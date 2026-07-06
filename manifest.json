@@ -1,0 +1,21 @@
+{
+  "name": "專業級 AI 中國象棋",
+  "short_name": "AI 中國象棋",
+  "description": "專業級 AI 中國象棋大師版，提供高品質 AI 對弈體驗。",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#d7ccc8",
+  "theme_color": "#5d4037",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
