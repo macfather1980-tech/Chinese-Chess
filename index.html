@@ -22,9 +22,6 @@
             --highlight-move: rgba(0, 255, 0, 0.5);
             --highlight-last: rgba(255, 255, 0, 0.4);
             --check-color: rgba(255, 0, 0, 0.6);
-            /* 新增按鈕配色變量 */
-            --btn-gradient-start: #8d6e63;
-            --btn-gradient-end: #5d4037;
         }
 
         * { 
@@ -156,7 +153,7 @@
         }
         .history-header {
             padding: 12px 15px; border-bottom: 1px solid #eee;
-            display: flex; justify-content: space-between; align-items: center;
+            display: flex; justify-between; align-items: center;
         }
         .history-list {
             flex: 1; padding: 10px; overflow-y: auto; 
@@ -174,35 +171,12 @@
         button:active { transform: scale(0.95); }
         .btn-group { display: flex; gap: 5px; }
 
-        /* --- 優化後的行動裝置歷史紀錄切換按鈕 --- */
         #mobile-history-toggle {
-            display: none; /* 桌面端預設隱藏 */
-            width: 90%;
-            max-width: 320px;
-            height: 54px;
-            margin: 25px auto 10px auto; /* 增加與棋盤的間距 */
-            background: linear-gradient(135deg, var(--btn-gradient-start), var(--btn-gradient-end));
-            color: white;
-            font-size: 1rem;
-            font-weight: bold;
-            border: none;
-            border-radius: 30px;
-            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.25);
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-            cursor: pointer;
-            z-index: 20;
-            -webkit-tap-highlight-color: transparent;
+            display: none; width: 100%; padding: 8px; background: #5d4037;
+            color: white; border: none; text-align: center;
         }
-
-        #mobile-history-toggle:active {
-            transform: scale(0.97);
-            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.2);
-        }
-
         @media (max-width: 850px) {
-            #mobile-history-toggle {
-                display: block;
-            }
+            #mobile-history-toggle { display: block; }
             .history-list { max-height: 120px; }
         }
     </style>
@@ -260,7 +234,6 @@
             <div id="pieces-layer"></div>
             <div id="highlights-layer"></div>
         </div>
-        
         <button id="mobile-history-toggle" onclick="toggleHistory()">顯示歷史紀錄</button>
     </div>
 
@@ -555,7 +528,6 @@ async function aiMove() {
     setTimeout(() => {
         for (const m of moves) {
             const { capturedPiece, oldKingPos, movingPiece } = makeMove(m.fr, m.fc, m.tr, m.tc, board);
-            /* 修正：將原本未定義的 mode 替換為實際定義的難度變數 difficulty */
             let score = minimaxCorrected(config.depth, -Infinity, Infinity, false, difficulty);
             unmakeMove(m.fr, m.fc, m.tr, m.tc, capturedPiece, movingPiece, oldKingPos);
             if (score > bestScore) { bestScore = score; bestMoves = [m]; }
@@ -760,7 +732,6 @@ function updateHistoryPanel() {
 
 function generateNotation(m) {
     const files = ['九', '八', '七', '六', '五', '四', '三', '二', '一'];
-    /* 修正：將陣列中原本打錯的韓文字元 '칠' 修正為中文的 '七' */
     const ranks = ['十', '九', '八', '七', '六', '五', '四', '三', '二', '一'];
     const pName = PIECES_MAP[m.pieceMoving];
     return `${pName} ${files[m.fc]} ${ranks[m.fr]} → ${files[m.tc]} ${ranks[m.tr]}`; 
