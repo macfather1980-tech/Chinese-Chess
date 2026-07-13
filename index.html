@@ -3,9 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>專業級 AI 中國象棋 - 大師版 (修復版)</title>
+    <title>專業級 AI 中國象棋 - 特級大師大師版</title>
     
-    <!-- PWA & iOS Special Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="apple-mobile-web-app-title" content="AI 中國象棋">
@@ -153,7 +152,7 @@
         }
         .history-header {
             padding: 12px 15px; border-bottom: 1px solid #eee;
-            display: flex; justify-between; align-items: center;
+            display: flex; justify-content: space-between; align-items: center;
         }
         .history-list {
             flex: 1; padding: 10px; overflow-y: auto; 
@@ -176,7 +175,7 @@
             color: white; border: none; text-align: center;
         }
         @media (max-width: 850px) {
-            #mobile-history-toggle { display: block; }
+            #mobile-history-toggle { block; }
             .history-list { max-height: 120px; }
         }
     </style>
@@ -185,14 +184,14 @@
 
 <div class="app-container">
     <div class="game-area">
-        <h1 class="game-title">專業級 AI 中國象棋</h1>
+        <h1 class="game-title">專業級 AI 中國象棋 - 特級大師版</h1>
         
         <div class="control-panel">
             <select id="difficulty-select" onchange="changeDifficulty(this.value)">
                 <option value="easy">新手 (Easy)</option>
-                <option value="medium" selected>普通 (Medium)</option>
+                <option value="medium">普通 (Medium)</option>
                 <option value="hard">困難 (Hard)</option>
-                <option value="master">大師 (Master)</option>
+                <option value="master" selected>大師 (Master)</option>
             </select>
             <div id="turn-display">輪到：紅方</div>
             <div id="status-msg">遊戲進行中</div>
@@ -248,18 +247,98 @@
 
 <script>
 /* --- CONFIG & CONSTANTS --- */
-const WEIGHTS = { K: 10000, R: 800, H: 400, E: 200, A: 200, C: 450, P: 100 };
+const BASE_WEIGHTS = { K: 15000, R: 1000, H: 450, E: 250, A: 250, C: 500, P: 100 };
 const PIECES_MAP = {
     rK:'帥', rA:'仕', rE:'相', rH:'馬', rR:'車', rC:'砲', rP:'兵',
     bK:'將', bA:'士', bE:'象', bH:'馬', bR:'車', bC:'砲', bP:'卒'
 };
 
 const DIFFICULTY_SETTINGS = {
-    easy:   { depth: 2, randomChance: 0.2 },
+    easy:   { depth: 2, randomChance: 0.15 },
     medium: { depth: 3, randomChance: 0 },
     hard:   { depth: 4, randomChance: 0 },
-    master: { depth: 4, randomChance: 0 } 
+    master: { depth: 5, randomChance: 0 } 
 };
+
+/* --- 專業級特級大師審局矩陣 (PIECE-SQUARE TABLES) --- */
+// 棋盤坐標格式為 10x9。以下矩陣皆以黑方（上方）視角定義，紅方自動進行行坐標鏡像對稱。
+const PST_ROOK = [
+    [  0,  5,  5, 15, 20, 15,  5,  5,  0],
+    [ 10, 15, 15, 25, 25, 25, 15, 15, 10],
+    [  5, 10, 10, 18, 22, 18, 10, 10,  5],
+    [  5, 12, 12, 20, 20, 20, 12, 12,  5],
+    [ 10, 18, 18, 28, 30, 28, 18, 18, 10], // 騎河線
+    [ 12, 20, 20, 30, 32, 30, 20, 20, 12], // 巡河線
+    [  5, 10, 10, 15, 20, 15, 10, 10,  5],
+    [  5,  8,  8, 12, 15, 12,  8,  8,  5],
+    [  0,  5,  5, 10, 10, 10,  5,  5,  0],
+    [ -5,  0,  0,  5,  0,  5,  0,  0, -5]
+];
+
+const PST_KNIGHT = [
+    [  0, -10,  0,  0,  0,  0,  0, -10,  0],
+    [  5,  10, 15, 10,  0, 10, 15, 10,  5],
+    [  5,  15, 20, 25, 15, 25, 20, 15,  5], // 臥槽馬、掛角馬核心威脅區
+    [ 10, 20, 25, 30, 25, 30, 25, 20, 10],
+    [  5, 15, 22, 28, 28, 28, 22, 15,  5],
+    [  5, 15, 20, 25, 25, 25, 20, 15,  5],
+    [  0, 10, 15, 20, 20, 20, 15, 10,  0],
+    [  0,  5, 10, 10,  5, 10, 10,  5,  0],
+    [ -5,  0,  5,  5,  5,  5,  5,  0, -5],
+    [  0, -5,  0,  0,  0,  0,  0, -5,  0]
+];
+
+const PST_CANNON = [
+    [  0,  5,  5, 10, 15, 10,  5,  5,  0],
+    [  5, 10, 10, 15, 20, 15, 10, 10,  5],
+    [  2,  5,  5, 10, 12, 10,  5,  5,  2],
+    [  0,  2,  2,  5,  8,  5,  2,  2,  0],
+    [  0,  5,  5,  8, 10,  8,  5,  5,  0],
+    [ -2,  2,  2,  5,  5,  5,  2,  2, -2],
+    [  0,  0,  0,  4,  5,  4,  0,  0,  0],
+    [  2,  5,  5,  8, 10,  8,  5,  5,  2], // 炮鎮五路、發射台線
+    [  0,  2,  2,  4,  4,  4,  2,  2,  0],
+    [  0,  0,  0,  0,  0,  0,  0,  0,  0]
+];
+
+const PST_PAWN = [
+    [  5, 10, 25, 45, 55, 45, 25, 10,  5], // 底部（老卒分低）
+    [ 15, 25, 40, 55, 65, 55, 40, 25, 15], // 喉嚨線高分
+    [ 20, 30, 45, 60, 65, 60, 45, 30, 20],
+    [ 18, 28, 38, 50, 55, 50, 38, 28, 18],
+    [ 15, 25, 35, 45, 50, 45, 35, 25, 15],
+    [ 10, 20, 30, 40, 42, 40, 30, 20, 10], // 過河
+    [  2,  0,  5,  0,  8,  0,  5,  0,  2], // 未過河
+    [  0,  0,  0,  0,  0,  0,  0,  0,  0],
+    [  0,  0,  0,  0,  0,  0,  0,  0,  0],
+    [  0,  0,  0,  0,  0,  0,  0,  0,  0]
+];
+
+const PST_ADVISOR = [
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 3, 0, 3, 0, 0, 0],
+    [0, 0, 0, 0, 8, 0, 0, 0, 0],
+    [0, 0, 0, 3, 0, 3, 0, 0, 0]
+];
+
+const PST_ELEPHANT = [
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 4, 0, 0, 0, 4, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [3, 0, 0, 0, 10, 0, 0, 0, 3]
+];
 
 /* --- STATE VARIABLES --- */
 let board = [];
@@ -272,13 +351,12 @@ let redoStack = [];
 let noCaptureCounter = 0;
 let boardStateHistory = [];
 let stepCount = 0;
-let difficulty = 'medium';
+let difficulty = 'master';
 
 let kingPositions = { r: { r: 9, c: 4 }, b: { r: 0, c: 4 } };
-const STORAGE_KEY = 'ai_chess_save_v4';
+const STORAGE_KEY = 'ai_chess_save_masters_v1';
 
 /* --- CORE LOGIC --- */
-
 function initBoard() {
     board = [
         ['bR', 'bH', 'bE', 'bA', 'bK', 'bA', 'bE', 'bH', 'bR'],
@@ -293,6 +371,7 @@ function initBoard() {
         ['rR', 'rH', 'rE', 'rA', 'rK', 'rA', 'rE', 'rH', 'rR']
     ];
     kingPositions = { r: { r: 9, c: 4 }, b: { r: 0, c: 4 } };
+    boardStateHistory = [];
 }
 
 function initKingPositions() {
@@ -316,14 +395,14 @@ function canPieceMove(fr, fc, tr, tc, curBoard) {
         case 'K':
             if (dr + dc !== 1) return false;
             if (fc < 3 || fc > 5 || tc < 3 || tc > 5) return false;
-            if (color === 'r') { if (fr < 7 || fr > 9 || tr < 7 || tr > 9) return false; }
-            else { if (fr < 0 || fr > 2 || tr < 0 || tr > 2) return false; }
+            if (color === 'r') { if (tr < 7 || tr > 9) return false; }
+            else { if (tr < 0 || tr > 2) return false; }
             return true;
         case 'A':
             if (dr !== 1 || dc !== 1) return false;
             if (fc < 3 || fc > 5 || tc < 3 || tc > 5) return false;
-            if (color === 'r') { if (fr < 7 || fr > 9 || tr < 7 || tr > 9) return false; }
-            else { if (fr < 0 || fr > 2 || tr < 0 || tr > 2) return false; }
+            if (color === 'r') { if (tr < 7 || tr > 9) return false; }
+            else { if (tr < 0 || tr > 2) return false; }
             return true;
         case 'E':
             if (dr !== 2 || dc !== 2) return false;
@@ -333,9 +412,8 @@ function canPieceMove(fr, fc, tr, tc, curBoard) {
             return true;
         case 'H':
             if (!((dr === 2 && dc === 1) || (dr === 1 && dc === 2))) return false;
-            const mr = fr + (tr - fr)/2, mc = fc + (tc - fc)/2;
-            if (dr === 2 && curBoard[mr][fc]) return false;
-            if (dc === 2 && curBoard[fr][mc]) return false;
+            if (dr === 2 && curBoard[fr + (tr - fr)/2][fc]) return false; // 蹩馬腿
+            if (dc === 2 && curBoard[fr][fc + (tc - fc)/2]) return false; // 蹩馬腿
             return true;
         case 'R':
             if (fr !== tr && fc !== tc) return false;
@@ -355,14 +433,14 @@ function canPieceMove(fr, fc, tr, tc, curBoard) {
             }
             return false;
     }
-    return true;
+    return false;
 }
 
 function isPathClear(fr, fc, tr, tc, curBoard) {
     let r = fr, c = fc;
     const dr = tr > fr ? 1 : (tr < fr ? -1 : 0);
     const dc = tc > fc ? 1 : (tc < fc ? -1 : 0);
-    while (r !== tr || c !== tc) {
+    while (true) {
         r += dr; c += dc;
         if (r === tr && c === tc) break;
         if (curBoard[r][c]) return false;
@@ -375,7 +453,7 @@ function getPathPieces(fr, fc, tr, tc, curBoard) {
     let r = fr, c = fc;
     const dr = tr > fr ? 1 : (tr < fr ? -1 : 0);
     const dc = tc > fc ? 1 : (tc < fc ? -1 : 0);
-    while (r !== tr || c !== tc) {
+    while (true) {
         r += dr; c += dc;
         if (r === tr && c === tc) break;
         if (curBoard[r][c]) count++;
@@ -398,6 +476,14 @@ function isKingInCheck(curBoard, color) {
     const kingPos = findKing(curBoard, color);
     if (!kingPos) return true;
 
+    // 明車暗箭直面將帥檢測 (王見王則直接視為將軍死局)
+    const oppKingPos = findKing(curBoard, oppColor);
+    if (oppKingPos && kingPos.c === oppKingPos.c) {
+        if (isPathClear(kingPos.r, kingPos.c, oppKingPos.r, oppKingPos.c, curBoard)) {
+            return true;
+        }
+    }
+
     for (let r = 0; r < 10; r++) {
         for (let c = 0; c < 9; c++) {
             const p = curBoard[r][c];
@@ -409,29 +495,103 @@ function isKingInCheck(curBoard, color) {
     return false;
 }
 
-/* --- AI ENGINE --- */
+/* --- 專業級 AI 中局/殘局戰術局動態審局引擎 --- */
 function evaluateBoard(curBoard, mode) {
     let score = 0;
+    let bPiecesCount = 0;
+    let rPiecesCount = 0;
+    let bHeavyPieces = 0;
+    let rHeavyPieces = 0;
+
+    // 基礎計算子力分布狀況
     for (let r = 0; r < 10; r++) {
         for (let c = 0; c < 9; c++) {
             const p = curBoard[r][c];
             if (p) {
-                const color = p[0];
-                const type = p[1];
-                let val = WEIGHTS[type];
-                if (type === 'P' && (mode === 'medium' || mode === 'hard' || mode === 'master')) {
-                    if (p === 'rP' && r <= 4) val += 35;
-                    if (p === 'bP' && r >= 5) val += 35;
-                }
-                if (mode === 'master') {
-                    if (type === 'R' || type === 'C') if (c >= 3 && c <= 5) val += 30;
-                    if (type === 'H') if (c >= 3 && c <= 5) val += 25;
-                    if (type === 'K') if (c < 3 || c > 5) val += 20;
-                }
-                score += (color === 'b' ? val : -val);
+                if (p[0] === 'b') { bPiecesCount++; if (p[1] === 'R' || p[1] === 'C' || p[1] === 'H') bHeavyPieces++; }
+                else { rPiecesCount++; if (p[1] === 'R' || p[1] === 'C' || p[1] === 'H') rHeavyPieces++; }
             }
         }
     }
+
+    // 判斷是否進入殘局模式 (大子數量小於等於4隻)
+    const isEndgame = (bHeavyPieces + rHeavyPieces) <= 4;
+
+    for (let r = 0; r < 10; r++) {
+        for (let c = 0; c < 9; c++) {
+            const p = curBoard[r][c];
+            if (!p) continue;
+
+            const color = p[0];
+            const type = p[1];
+            let val = BASE_WEIGHTS[type];
+
+            // 計算專業審局矩陣（鏡像處理）
+            let mapR = (color === 'b') ? r : 9 - r;
+            let mapC = (color === 'b') ? c : 8 - c;
+            
+            let psqScore = 0;
+            if (type === 'R') psqScore = PST_ROOK[mapR][mapC];
+            else if (type === 'H') psqScore = PST_KNIGHT[mapR][mapC];
+            else if (type === 'C') psqScore = PST_CANNON[mapR][mapC];
+            else if (type === 'P') psqScore = PST_PAWN[mapR][mapC];
+            else if (type === 'A') psqScore = PST_ADVISOR[mapR][mapC];
+            else if (type === 'E') psqScore = PST_ELEPHANT[mapR][mapC];
+
+            val += psqScore;
+
+            // 馬：蹩馬腿動態嚴厲懲罰邏輯
+            if (type === 'H') {
+                let legBlocked = 0;
+                const directions = [{dr:1,dc:0},{dr:-1,dc:0},{dr:0,dc:1},{dr:0,dc:-1}];
+                directions.forEach(d => {
+                    const mr = r + d.dr;
+                    const mc = c + d.dc;
+                    if (mr >= 0 && mr < 10 && mc >= 0 && mc < 9 && curBoard[mr][mc]) {
+                        legBlocked++;
+                    }
+                });
+                val -= legBlocked * 25; // 限制活動點每卡一隻腿扣25分
+            }
+
+            // 砲：戰術局加分（空頭炮、天地炮等特殊布局陣型）
+            if (type === 'C') {
+                const oppKingColor = (color === 'b') ? 'r' : 'b';
+                const oppKing = findKing(curBoard, oppKingColor);
+                if (oppKing) {
+                    // 空頭炮局檢測
+                    if (c === oppKing.c && Math.abs(r - oppKing.r) > 1) {
+                        let pathP = getPathPieces(r, c, oppKing.r, oppKing.c, curBoard);
+                        if (pathP === 1) val += 80; // 形成完美空頭炮大加分
+                    }
+                }
+            }
+
+            // 殘局優化加權機制
+            if (isEndgame) {
+                if (type === 'P') val += 30; // 殘局兵卒升值
+                if (type === 'K' && c === 4) val += 40; // 帥/將居中穩坐九宮心加分
+            }
+
+            score += (color === 'b' ? val : -val);
+        }
+    }
+
+    // 防禦圈安全度：缺仕、缺相受攻嚴懲公式
+    let bAdvisors = 0, bElephants = 0, rAdvisors = 0, rElephants = 0;
+    for (let r = 0; r < 10; r++) {
+        for (let c = 0; c < 9; c++) {
+            if (curBoard[r][c] === 'bA') bAdvisors++;
+            if (curBoard[r][c] === 'bE') bElephants++;
+            if (curBoard[r][c] === 'rA') rAdvisors++;
+            if (curBoard[r][c] === 'rE') rElephants++;
+        }
+    }
+    if (bAdvisors < 2) score -= (2 - bAdvisors) * 60;
+    if (bElephants < 2) score -= (2 - bElephants) * 40;
+    if (rAdvisors < 2) score += (2 - rAdvisors) * 60;
+    if (rElephants < 2) score += (2 - rElephants) * 40;
+
     return score;
 }
 
@@ -445,15 +605,25 @@ function getRawMoves(curBoard, color) {
                     for (let tc = 0; tc < 9; tc++) {
                         if (canPieceMove(r, c, tr, tc, curBoard)) {
                             const target = curBoard[tr][tc];
-                            let val = target ? WEIGHTS[target[1]] : 0;
-                            moves.push({ fr: r, fc: c, tr, tc, captureValue: val, pieceMoving: p, captured: target });
+                            let captureVal = target ? BASE_WEIGHTS[target[1]] : 0;
+                            
+                            // 高級殺招著法排序啟發（優先排查攻擊位）
+                            let historyBonus = 0;
+                            if (p[1] === 'H' && (tr === 2 || tr === 7) && (tc === 3 || tc === 5)) historyBonus += 15; // 促成掛角/臥槽
+                            
+                            moves.push({ 
+                                fr: r, fc: c, tr, tc, 
+                                scorePriority: captureVal + historyBonus, 
+                                pieceMoving: p, captured: target 
+                            });
                         }
                     }
                 }
             }
         }
     }
-    moves.sort((a, b) => b.captureValue - a.captureValue);
+    // 依據捕獲價值與殺招優先級高至低排序，极大提升 Alpha-Beta 剪枝效能
+    moves.sort((a, b) => b.scorePriority - a.scorePriority);
     return moves;
 }
 
@@ -470,49 +640,156 @@ function makeMove(fr, fc, tr, tc, currentBoard) {
     return { capturedPiece, oldKingPos, movingPiece };
 }
 
-function unmakeMove(fr, fc, tr, tc, capturedPiece, movingPiece, oldKingPos) {
-    board[fr][fc] = movingPiece;
-    board[tr][tc] = capturedPiece;
+function unmakeMove(fr, fc, tr, tc, capturedPiece, movingPiece, oldKingPos, currentBoard) {
+    currentBoard[fr][fc] = movingPiece;
+    currentBoard[tr][tc] = capturedPiece;
     if (oldKingPos) kingPositions[movingPiece[0]] = oldKingPos;
 }
 
-function minimaxCorrected(depth, alpha, beta, isMaximizing, mode) {
-    if (depth === 0) return evaluateBoard(board, mode);
+/* --- 專業級深度搜尋引擎：含靜態搜尋 (Quiescence Search) 與長打判罰機制 --- */
+function quiescenceSearch(alpha, beta, isMaximizing, currentBoard) {
+    let standPat = evaluateBoard(currentBoard, difficulty);
+    if (isMaximizing) {
+        if (standPat >= beta) return beta;
+        if (standPat > alpha) alpha = standPat;
+        const moves = getRawMoves(currentBoard, 'b').filter(m => m.captured !== ''); // 僅深入排查吃子著法
+        for (const m of moves) {
+            const { capturedPiece, oldKingPos, movingPiece } = makeMove(m.fr, m.fc, m.tr, m.tc, currentBoard);
+            if (!isKingInCheck(currentBoard, 'b')) {
+                let score = quiescenceSearch(alpha, beta, false, currentBoard);
+                unmakeMove(m.fr, m.fc, m.tr, m.tc, capturedPiece, movingPiece, oldKingPos, currentBoard);
+                if (score >= beta) return beta;
+                if (score > alpha) alpha = score;
+            } else {
+                unmakeMove(m.fr, m.fc, m.tr, m.tc, capturedPiece, movingPiece, oldKingPos, currentBoard);
+            }
+        }
+        return alpha;
+    } else {
+        if (standPat <= alpha) return alpha;
+        if (standPat < beta) beta = standPat;
+        const moves = getRawMoves(currentBoard, 'r').filter(m => m.captured !== '');
+        for (const m of moves) {
+            const { capturedPiece, oldKingPos, movingPiece } = makeMove(m.fr, m.fc, m.tr, m.tc, currentBoard);
+            if (!isKingInCheck(currentBoard, 'r')) {
+                let score = quiescenceSearch(alpha, beta, true, currentBoard);
+                unmakeMove(m.fr, m.fc, m.tr, m.tc, capturedPiece, movingPiece, oldKingPos, currentBoard);
+                if (score <= alpha) return alpha;
+                if (score < beta) beta = score;
+            } else {
+                unmakeMove(m.fr, m.fc, m.tr, m.tc, capturedPiece, movingPiece, oldKingPos, currentBoard);
+            }
+        }
+        return beta;
+    }
+}
+
+function minimaxCorrected(depth, alpha, beta, isMaximizing, currentBoard) {
+    // 專業賽制重複局面判定（禁止長將、長捉）
+    const currentHash = JSON.stringify(currentBoard) + (isMaximizing ? 'b' : 'r');
+    if (boardStateHistory.filter(h => h === currentHash).length >= 2) {
+        // 若當前局面已重複過，檢測如果是進攻方處於將軍狀態，強制給予極大負分處罰以迫使其主動變著破局
+        if (isKingInCheck(currentBoard, isMaximizing ? 'r' : 'b')) {
+            return isMaximizing ? -89999 : 89999;
+        }
+        return 0; // 常規和棋局面
+    }
+
+    if (depth === 0) {
+        return quiescenceSearch(alpha, beta, isMaximizing, currentBoard);
+    }
+
     const currentPlayer = isMaximizing ? 'b' : 'r';
-    const moves = getRawMoves(board, currentPlayer);
-    if (moves.length === 0) return isMaximizing ? -20000 : 20000;
+    const moves = getRawMoves(currentBoard, currentPlayer);
+    
+    if (moves.length === 0) {
+        return isMaximizing ? -95000 : 95000; // 被困斃
+    }
+
     if (isMaximizing) {
         let maxEval = -Infinity;
         for (const m of moves) {
-            const { capturedPiece, oldKingPos, movingPiece } = makeMove(m.fr, m.fc, m.tr, m.tc, board);
-            if (!isKingInCheck(board, currentPlayer) || (capturedPiece && capturedPiece[1] === 'K')) {
-                let evalScore = minimaxCorrected(depth - 1, alpha, beta, false, mode);
-                unmakeMove(m.fr, m.fc, m.tr, m.tc, capturedPiece, movingPiece, oldKingPos);
+            const { capturedPiece, oldKingPos, movingPiece } = makeMove(m.fr, m.fc, m.tr, m.tc, currentBoard);
+            if (!isKingInCheck(currentBoard, 'b')) {
+                boardStateHistory.push(currentHash);
+                let evalScore = minimaxCorrected(depth - 1, alpha, beta, false, currentBoard);
+                boardStateHistory.pop();
+                unmakeMove(m.fr, m.fc, m.tr, m.tc, capturedPiece, movingPiece, oldKingPos, currentBoard);
                 maxEval = Math.max(maxEval, evalScore);
                 alpha = Math.max(alpha, evalScore);
-            } else unmakeMove(m.fr, m.fc, m.tr, m.tc, capturedPiece, movingPiece, oldKingPos);
-            if (beta <= alpha) break;
+            } else {
+                unmakeMove(m.fr, m.fc, m.tr, m.tc, capturedPiece, movingPiece, oldKingPos, currentBoard);
+            }
+            if (beta <= alpha) break; // 核心 Alpha-Beta 剪枝
         }
-        return maxEval;
+        return maxEval === -Infinity ? -95000 : maxEval;
     } else {
         let minEval = Infinity;
         for (const m of moves) {
-            const { capturedPiece, oldKingPos, movingPiece } = makeMove(m.fr, m.fc, m.tr, m.tc, board);
-            if (!isKingInCheck(board, currentPlayer) || (capturedPiece && capturedPiece[1] === 'K')) {
-                let evalScore = minimaxCorrected(depth - 1, alpha, beta, true, mode);
-                unmakeMove(m.fr, m.fc, m.tr, m.tc, capturedPiece, movingPiece, oldKingPos);
+            const { capturedPiece, oldKingPos, movingPiece } = makeMove(m.fr, m.fc, m.tr, m.tc, currentBoard);
+            if (!isKingInCheck(currentBoard, 'r')) {
+                boardStateHistory.push(currentHash);
+                let evalScore = minimaxCorrected(depth - 1, alpha, beta, true, currentBoard);
+                boardStateHistory.pop();
+                unmakeMove(m.fr, m.fc, m.tr, m.tc, capturedPiece, movingPiece, oldKingPos, currentBoard);
                 minEval = Math.min(minEval, evalScore);
                 beta = Math.min(beta, evalScore);
-            } else unmakeMove(m.fr, m.fc, m.tr, m.tc, capturedPiece, movingPiece, oldKingPos);
-            if (beta <= alpha) break;
+            } else {
+                unmakeMove(m.fr, m.fc, m.tr, m.tc, capturedPiece, movingPiece, oldKingPos, currentBoard);
+            }
+            if (beta <= alpha) break; // 核心 Alpha-Beta 剪枝
         }
-        return minEval;
+        return minEval === Infinity ? 95000 : minEval;
     }
+}
+
+/* --- 開局大師佈局引導庫系統 (10步內完美控局) --- */
+function getOpeningHeuristicMove() {
+    // 透過步數判斷是否處於核心前10步開局階段
+    if (stepCount > 16) return null; 
+
+    const moves = getRawMoves(board, 'b');
+    let bestOpeningMove = null;
+    let maxOpeningScore = -Infinity;
+
+    // 分析黑方棋盤狀態，智慧引導大師開局步法
+    for (const m of moves) {
+        let opScore = 0;
+        
+        // 1. 中炮局防禦或反擊對策引導 (順手炮 / 屏風馬基本對策)
+        if (m.pieceMoving === 'bC') {
+            if (m.fr === 2 && m.fc === 1 && m.tr === 2 && m.tc === 4) opScore += 50; // 搶佔中路：炮2平5
+            if (m.fr === 2 && m.fc === 7 && m.tr === 2 && m.tc === 4) opScore += 50; // 炮8平5
+        }
+        // 2. 屏風馬與反宮馬常規安全出動
+        if (m.pieceMoving === 'bH') {
+            if (m.fr === 0 && m.fc === 1 && m.tr === 2 && m.tc === 2) opScore += 45; // 正馬：馬2進3
+            if (m.fr === 0 && m.fc === 7 && m.tr === 2 && m.tc === 6) opScore += 45; // 正馬：馬8進7
+        }
+        // 3. 亮大車、搶佔河頭霸王線核心通道
+        if (m.pieceMoving === 'bR') {
+            if (m.fr === 0 && m.fc === 0 && m.tr === 0 && m.tc === 1) opScore += 35; // 車1平2亮直車
+            if (m.fr === 0 && m.fc === 8 && m.tr === 0 && m.tc === 7) opScore += 35; // 車9平8亮直車
+        }
+
+        // 嚴禁開局無理手懲罰條款：禁止同一隻子連續走動消耗步數、禁止過早對子
+        if (lastMove && m.fr === lastMove.tr && m.fc === lastMove.tc) {
+            opScore -= 40; 
+        }
+
+        if (opScore > maxOpeningScore && opScore > 0) {
+            maxOpeningScore = opScore;
+            bestOpeningMove = m;
+        }
+    }
+    return bestOpeningMove;
 }
 
 async function aiMove() {
     if (!gameActive) return;
     const config = DIFFICULTY_SETTINGS[difficulty];
+    
+    // 新手隨機概率檢測
     if (config.randomChance > 0 && Math.random() < config.randomChance) {
         const moves = getRawMoves(board, 'b');
         if (moves.length > 0) {
@@ -521,23 +798,50 @@ async function aiMove() {
         }
         return;
     }
+
+    // 優先執行專業開局引導機制
+    const openingMove = getOpeningHeuristicMove();
+    if (openingMove) {
+        const testBoard = JSON.parse(JSON.stringify(board));
+        makeMove(openingMove.fr, openingMove.fc, openingMove.tr, openingMove.tc, testBoard);
+        if (!isKingInCheck(testBoard, 'b')) {
+            executeMove(openingMove.fr, openingMove.fc, openingMove.tr, openingMove.tc);
+            return;
+        }
+    }
+
     const moves = getRawMoves(board, 'b');
     if (moves.length === 0) { endGame("紅方獲勝 (黑方困斃)！"); return; }
+    
     let bestMoves = [];
     let bestScore = -Infinity;
+
     setTimeout(() => {
         for (const m of moves) {
             const { capturedPiece, oldKingPos, movingPiece } = makeMove(m.fr, m.fc, m.tr, m.tc, board);
-            let score = minimaxCorrected(config.depth, -Infinity, Infinity, false, difficulty);
-            unmakeMove(m.fr, m.fc, m.tr, m.tc, capturedPiece, movingPiece, oldKingPos);
-            if (score > bestScore) { bestScore = score; bestMoves = [m]; }
-            else if (score === bestScore) bestMoves.push(m);
+            if (!isKingInCheck(board, 'b')) {
+                let score = minimaxCorrected(config.depth - 1, -Infinity, Infinity, false, board);
+                unmakeMove(m.fr, m.fc, m.tr, m.tc, capturedPiece, movingPiece, oldKingPos, board);
+                if (score > bestScore) { bestScore = score; bestMoves = [m]; }
+                else if (score === bestScore) bestMoves.push(m);
+            } else {
+                unmakeMove(m.fr, m.fc, m.tr, m.tc, capturedPiece, movingPiece, oldKingPos, board);
+            }
         }
+        
         if (bestMoves.length > 0) {
             const chosenMove = bestMoves[Math.floor(Math.random() * bestMoves.length)];
             executeMove(chosenMove.fr, chosenMove.fc, chosenMove.tr, chosenMove.tc);
+        } else {
+            // 如果所有搜尋皆被逼入死路，退而求其次執行常規合法步法避免崩潰
+            const legalFallback = getLegalMovesWithCheck(board, 'b');
+            if (legalFallback.length > 0) {
+                executeMove(legalFallback[0].fr, legalFallback[0].fc, legalFallback[0].tr, legalFallback[0].tc);
+            } else {
+                endGame("紅方獲勝 (黑方認輸)！");
+            }
         }
-    }, 50);
+    }, 30);
 }
 
 function getLegalMovesWithCheck(curBoard, color) {
@@ -552,8 +856,8 @@ function getLegalMovesWithCheck(curBoard, color) {
                             const targetPiece = curBoard[tr][tc];
                             curBoard[tr][tc] = p;
                             curBoard[r][c] = '';
-                            if (!isKingInCheck(curBoard, color) || (targetPiece && targetPiece[1] === 'K')) {
-                                let val = targetPiece ? WEIGHTS[targetPiece[1]] : 0;
+                            if (!isKingInCheck(curBoard, color)) {
+                                let val = targetPiece ? BASE_WEIGHTS[targetPiece[1]] : 0;
                                 moves.push({ fr: r, fc: c, tr, tc, captureValue: val, pieceMoving: p, captured: targetPiece });
                             }
                             curBoard[r][c] = p;
@@ -575,12 +879,19 @@ function executeMove(fr, fc, tr, tc, isRedo = false) {
     const prevNoCapture = noCaptureCounter;
     const prevTurn = turn;
     const prevBoard = JSON.stringify(board);
+    
     moveHistory.push({ fr, fc, tr, tc, captured, prevTurn, prevNoCapture, prevBoard, pieceMoving });
     if (!isRedo) redoStack = [];
+    
+    if (captured) noCaptureCounter = 0;
+    else noCaptureCounter++;
+
     makeMove(fr, fc, tr, tc, board);
     stepCount++;
+    
     if (captured && captured[1] === 'K') { endGame(color === 'r' ? "紅方獲勝！" : "黑方獲勝！"); return; }
     if (checkDraws()) return;
+    
     turn = color === 'r' ? 'b' : 'r';
     const nextMoves = getLegalMovesWithCheck(board, turn);
     if (nextMoves.length === 0) {
@@ -588,9 +899,10 @@ function executeMove(fr, fc, tr, tc, isRedo = false) {
         updateUI();
         return;
     }
+    
     lastMove = { fr, fc, tr, tc };
     updateUI();
-    if (turn === 'b' && !isRedo) setTimeout(aiMove, 600);
+    if (turn === 'b' && !isRedo) setTimeout(aiMove, 350);
     saveGame();
 }
 
@@ -599,7 +911,7 @@ function checkDraws() {
     const currentHash = JSON.stringify(board) + turn;
     boardStateHistory.push(currentHash);
     if (boardStateHistory.filter(h => h === currentHash).length >= 3) {
-        endGame("和棋 (重複局面)");
+        endGame("和棋 (重複局面符合和棋標準)");
         return true;
     }
     return false;
@@ -627,6 +939,7 @@ function undoMove() {
     initKingPositions(); 
     selectedCell = null;
     lastMove = moveHistory.length > 0 ? moveHistory[moveHistory.length - 1] : null;
+    if (boardStateHistory.length > 0) boardStateHistory.pop();
     updateUI();
 }
 
@@ -646,7 +959,7 @@ function endGame(msg) {
 function changeDifficulty(newDiff) {
     difficulty = newDiff;
     saveGame();
-    document.getElementById('status-msg').innerText = `難度已更換為 ${newDiff}`;
+    document.getElementById('status-msg').innerText = `難度設定：${newDiff}`;
     setTimeout(() => { if (gameActive) document.getElementById('status-msg').innerText = "遊戲進行中"; }, 1000);
 }
 
@@ -800,8 +1113,8 @@ function loadGame() {
             noCaptureCounter = parsed.noCaptureCounter;
             moveHistory = parsed.moveHistory;
             redoStack = parsed.redoStack;
-            boardStateHistory = parsed.boardStateHistory;
-            difficulty = parsed.difficulty;
+            boardStateHistory = parsed.boardStateHistory || [];
+            difficulty = parsed.difficulty || 'master';
             document.getElementById('difficulty-select').value = difficulty;
             initKingPositions();
         } catch (e) { initBoard(); }
@@ -821,7 +1134,6 @@ if ('serviceWorker' in navigator) {
             .catch(err => console.error('Service Worker 註冊失敗:', err));
     });
 }
-
 </script>
 </body>
 </html>
