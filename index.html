@@ -703,7 +703,7 @@ function bootWasmWorker(parts, kind){
   WASM.worker.onmessage=function(e){
     var d=e.data||{};
     if(d.type==='status'){
-      if(d.phase==='ready'){ WASM.state='ready'; WASM.netPct=100; if(S.mode==='ai') refreshChrome(); }
+      if(d.phase==='ready'){ WASM.state='ready'; WASM.netPct=100; document.title='中國象棋 · ⚡Pikafish✅'; if(S.mode==='ai') refreshChrome(); }
       else if(d.phase==='failed'){
         WASM.failMsg=d.msg||'';
         /* Engine init failed (corrupt/partial net on the web path — e.g. a
@@ -715,7 +715,7 @@ function bootWasmWorker(parts, kind){
             if(ok){ try{ WASM.worker.terminate(); }catch(e){} bootWasmWorker(embeddedAssets(),'embed'); return; }
           });
         }
-        WASM.state='failed'; WASM.worker=null; if(S.mode==='ai') refreshChrome();
+        WASM.state='failed'; WASM.worker=null; document.title='中國象棋 · ⚠JS備用'; if(S.mode==='ai') refreshChrome();
       }
     }
   };
@@ -783,7 +783,7 @@ function startWasmLoad(){
 
   acquire
     .then(function(parts){ bootWasmWorker(parts, IS_WEB?'web':'embed'); })
-    .catch(function(err){ console.warn('WASM load failed:', err && err.message || err); WASM.state='failed'; WASM.failMsg=(err&&err.message)||''; if(S.mode==='ai') refreshChrome(); });
+    .catch(function(err){ console.warn('WASM load failed:', err && err.message || err); WASM.state='failed'; WASM.failMsg=(err&&err.message)||''; document.title='中國象棋 · ⚠JS備用'; if(S.mode==='ai') refreshChrome(); });
 }
 
 function mapWasmDone(d,str){
@@ -944,6 +944,11 @@ function refreshStatus(){
     else if(WASM.state==='failed') eng=' <span style="color:var(--bad);font-weight:700" title="'+(WASM.failMsg||'')+'">⚠JS引擎(備用)</span>';
   }
   statusEl.innerHTML = '<span class="turn-dot '+dotCls+'"></span>'+(S.think?'<span class="thinking">AI 思考中</span>':'輪到'+who)+extra+aiInfo+eng;
+  /* Safari tab title = engine status (always visible, easy to confirm) */
+  document.title = '中國象棋 '+(S.mode!=='ai'?'· 雙人格':
+    WASM.state==='ready'?'· ⚡Pikafish':
+    WASM.state==='loading'?'· ⚡'+(WASM.netPct>=0?WASM.netPct+'%':'載入中'):
+    WASM.state==='failed'?'· ⚠JS備用':'· 載入中');
 }
 
 function refreshEval(){
