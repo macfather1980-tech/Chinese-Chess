@@ -62,11 +62,14 @@ button{ font-family:inherit; color:inherit; cursor:pointer; }
   padding:3px 9px; border-radius:20px; background:rgba(255,255,255,.06);
   border:1px solid rgba(255,255,255,.1); white-space:nowrap; }
 .eng-badge .dot{ width:7px; height:7px; border-radius:50%; flex:none; }
-.eng-badge.loading .dot{ background:var(--gold); animation:engPulse 1.2s ease-in-out infinite; }
-.eng-badge.ready .dot{ background:var(--good); }
+.eng-badge.loading .dot{ width:10px; height:10px; background:transparent;
+  border:2px solid rgba(231,194,125,.25); border-top-color:var(--gold-2);
+  animation:spin .9s linear infinite; }
+.eng-badge.ready .dot{ background:var(--good); box-shadow:0 0 8px rgba(123,191,106,.7); }
 .eng-badge.failed .dot{ background:var(--bad); }
 .eng-badge.hidden{ display:none; }
 @keyframes engPulse{ 0%,100%{opacity:.4;transform:scale(.8)} 50%{opacity:1;transform:scale(1.15)} }
+@keyframes spin{ to{ transform:rotate(360deg); } }
 
 header.topbar{
   display:flex; align-items:center; gap:6px;
@@ -88,6 +91,26 @@ header.topbar{
   pointer-events:auto; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
 .iconbtn:active{ transform:translateY(1px); }
 .iconbtn.on{ background:linear-gradient(180deg,var(--gold-2),var(--gold)); color:#3a2410; font-weight:700; }
+
+/* ---- AI thinking strip (visible only while the engine is searching) ----
+   Shows live telemetry from the engine (depth / score / nps / elapsed) so the
+   player always knows what the AI is doing. */
+#thinkStrip{ flex:none; display:flex; align-items:center; gap:8px; padding:5px 12px;
+  background:linear-gradient(90deg, rgba(231,194,125,.16), rgba(231,194,125,.04) 55%, rgba(231,194,125,.12));
+  border:1px solid rgba(231,194,125,.4); border-radius:11px;
+  color:var(--gold-2); font-size:.78rem; box-shadow:inset 0 0 14px rgba(0,0,0,.25); }
+#thinkStrip[hidden]{ display:none; }
+.ts-spin{ width:11px; height:11px; border-radius:50%; flex:none;
+  border:2px solid rgba(231,194,125,.25); border-top-color:var(--gold-2);
+  animation:spin .8s linear infinite; }
+.ts-label{ flex:none; font-weight:700; letter-spacing:.05em; }
+.ts-metrics{ flex:none; color:var(--text); opacity:.9; font-variant-numeric:tabular-nums; letter-spacing:.02em; }
+.ts-bar{ flex:1; height:4px; border-radius:3px; background:rgba(0,0,0,.35); overflow:hidden; position:relative; min-width:16px; }
+.ts-fill{ position:absolute; top:0; bottom:0; left:-45%; width:40%; border-radius:3px;
+  background:linear-gradient(90deg, transparent, var(--gold-2) 50%, transparent);
+  animation:sweep 1.5s cubic-bezier(.45,.05,.55,.95) infinite; }
+@keyframes sweep{ to{ left:105%; } }
+.tray .adv.think{ color:var(--gold-2); animation:engPulse 1.1s ease-in-out infinite; }
 
 /* ---- main column: board row, then trays, then controls ---- */
 .main{ flex:1; display:flex; flex-direction:column; gap:6px; min-height:0; min-width:0; }
@@ -221,6 +244,13 @@ header.topbar{
     <button class="iconbtn" id="btnMenu" title="主選單">☰</button>
   </header>
 
+  <div id="thinkStrip" hidden>
+    <span class="ts-spin"></span>
+    <span class="ts-label" id="tsLabel">⚡ AI 思考中</span>
+    <span class="ts-metrics" id="tsMetrics"></span>
+    <div class="ts-bar"><div class="ts-fill"></div></div>
+  </div>
+
   <div class="main">
     <div class="board-row">
       <div id="boardArea">
@@ -312,13 +342,14 @@ var S = {
   mode:'ai', humanColor:1, aiColor:-1, diff:2,
   redOnBottom:true, selected:-1, legal:[], lastMove:null, lastDepth:null,
   gameOver:false, result:null, sound:true,
-  nodes:[], sqNode:null, scale:1, dragging:false, think:false
+  nodes:[], sqNode:null, scale:1, dragging:false, think:false, thinkInfo:null
 };
 
 /* ---- DOM ---- */
 var $ = function(id){ return document.getElementById(id); };
 var boardFrame=$('boardFrame'), lines=$('lines'), piecesEl=$('pieces'), marksEl=$('marks');
 var statusEl=$('status'), evalFill=$('evalFill'), evalNum=$('evalNum');
+var thinkStripEl=$('thinkStrip'), tsLabel=$('tsLabel'), tsMetrics=$('tsMetrics');
 var moveListEl=$('moveList'), capsRed=$('capsRed'), capsBlack=$('capsBlack');
 var menuEl=$('menu'), overlayEl=$('overlay');
 
@@ -669,8 +700,35 @@ function getWorker(){
    Web mode falls back to EMBED automatically when the fetches fail
    (corrupt/partial 50MB file, Git-LFS pointer served instead, offline…).
    ===================================================================== */
-var WASM={ state:'unloaded', worker:null, reqId:0, busy:false, netPct:-1, srcKind:'', usedEmbedded:false };
+var WASM={ state:'unloaded', worker:null, reqId:0, busy:false, netPct:-1, srcKind:'', usedEmbedded:false,
+            loadMsg:'', readyMsg:'', failMsg:'' };
 var IS_WEB=(location.protocol==='http:'||location.protocol==='https:');
+
+/* Map engine/WASM state to badge + status-line text. Everything in the UI
+   about "is Pikafish loaded, and what is it doing" flows through here. */
+function engLabel(){
+  if(WASM.state==='ready'){
+    return { cls:'ready', text:'⚡ Pikafish'+(WASM.usedEmbedded?'(內置)':''),
+             status:'⚡Pikafish'+(WASM.usedEmbedded?'(內置)':''),
+             tip:'⚡ Pikafish WASM 專業引擎已就緒'+(WASM.readyMsg?('（'+WASM.readyMsg+'）'):'') };
+  }
+  if(WASM.state==='loading'){
+    var m=WASM.loadMsg||'';
+    if(WASM.netPct>=0) return { cls:'loading', text:'⚡ '+WASM.netPct+'%',
+      status:'⚡ 下載中 '+WASM.netPct+'%', tip:'⚡ 下載 NNUE 評估網 '+WASM.netPct+'%（約48MB）' };
+    if(WASM.netPct===-2) return { cls:'loading', text:'⚡ 解碼中',
+      status:'⚡ 解碼中', tip:'⚡ 解碼內置引擎資源（assets-embedded.js）' };
+    if(/compil/i.test(m)) return { cls:'loading', text:'⚡ 編譯中', status:'⚡ 編譯中', tip:'⚡ 編譯 WASM 引擎（'+m+'）' };
+    if(/net/i.test(m)) return { cls:'loading', text:'⚡ 載入網', status:'⚡ 載入網', tip:'⚡ 載入 NNUE 評估網（'+m+'）' };
+    if(m) return { cls:'loading', text:'⚡ 載入中', status:'⚡ '+m, tip:'⚡ '+m };
+    return { cls:'loading', text:'⚡ 載入中', status:'⚡ 準備中', tip:'⚡ 準備引擎中' };
+  }
+  if(WASM.state==='failed'){
+    return { cls:'failed', text:'⚠ JS備用', status:'⚠JS引擎(備用)',
+             tip:'⚠ WASM 引擎失敗：'+(WASM.failMsg||'未知')+' — 已改用 JS 備用引擎' };
+  }
+  return { cls:'hidden', text:'', status:'', tip:'' };
+}
 
 /* ---- EMBED path: load assets-embedded.js with a script tag ---- */
 var EMBED={ promise:null, fail:'' };
@@ -718,7 +776,8 @@ function bootWasmWorker(parts, kind){
   WASM.worker.onmessage=function(e){
     var d=e.data||{};
     if(d.type==='status'){
-      if(d.phase==='ready'){ WASM.state='ready'; WASM.netPct=100; document.title='中國象棋 · ⚡Pikafish✅'; if(S.mode==='ai') refreshChrome(); }
+      WASM.loadMsg=d.msg||'';
+      if(d.phase==='ready'){ WASM.readyMsg=d.msg||''; WASM.state='ready'; WASM.netPct=100; document.title='中國象棋 · ⚡Pikafish✅'; if(S.mode==='ai') refreshChrome(); }
       else if(d.phase==='failed'){
         WASM.failMsg=d.msg||'';
         /* Engine init failed (corrupt/partial net on the web path — e.g. a
@@ -828,7 +887,9 @@ function wasmSearch(str,opt,cb){
   };
   var om=function(e){
     var d=e.data||{};
-    if(d.type!=='done' || d.reqId!==id) return;
+    if(d.reqId!==id) return;
+    if(d.type==='info'){ if(S.think){ S.thinkInfo=d; pumpThink(); } return; }
+    if(d.type!=='done') return;
     finish(d);
   };
   w.addEventListener('message',om);
@@ -861,18 +922,18 @@ function fallbackSearch(str,opt,cb){
 
 function aiTurn(){
   if(S.gameOver) return;
-  S.think=true; refreshStatus();
+  setThink(true);
   var opt=DIFF[S.diff];
   /* opening book: deterministic theory, played instantly (prob per level) */
   var bk=bookMove();
-  if(bk>=0){ S.lastDepth=null; commitMove(bk,true); S.think=false; return; }
+  if(bk>=0){ S.lastDepth=null; commitMove(bk,true); setThink(false); return; }
   var str=XQ.positionToString(S.pos.b,S.pos.turn);
   searchAsync(str,{timeMs:opt.timeMs,maxDepth:opt.maxDepth},function(res){
     if(!S.think) return;              // a duplicate result (WASM+JS race) — ignore
-    if(S.gameOver){ S.think=false; refreshStatus(); return; }
+    if(S.gameOver){ setThink(false); return; }
     S.lastDepth=res.depth!=null?res.depth:null;
     var mv=chooseAIMove(res);
-    S.think=false;
+    setThink(false);
     if(mv<0){ afterMove(); return; }   // no legal move (should be caught earlier)
     // defensive legality check
     var ok=false; var lm=XQ.genMoves(S.pos,true);
@@ -954,18 +1015,82 @@ function refreshStatus(){
   var aiInfo=(S.lastDepth!=null?' <span style="opacity:.6">depth '+S.lastDepth+'</span>':'');
   var eng='';
   if(S.mode==='ai'){
-    if(WASM.state==='ready') eng=' <span style="color:var(--gold);font-weight:700">⚡Pikafish'+(WASM.usedEmbedded?'(內置)':'')+'</span>';
-    else if(WASM.state==='loading') eng=' <span style="color:var(--gold);opacity:.8">⚡'+(WASM.netPct>=0?'下載中 '+WASM.netPct+'%':(WASM.netPct===-2?'解碼中':'準備中'))+'</span>';
-    else if(WASM.state==='failed') eng=' <span style="color:var(--bad);font-weight:700" title="'+(WASM.failMsg||'')+'">⚠JS引擎(備用)</span>';
+    var EL=engLabel();
+    if(WASM.state==='ready') eng=' <span style="color:var(--gold);font-weight:700">'+EL.status+'</span>';
+    else if(WASM.state==='loading') eng=' <span style="color:var(--gold);opacity:.85" title="'+EL.tip+'">'+EL.status+'</span>';
+    else if(WASM.state==='failed') eng=' <span style="color:var(--bad);font-weight:700" title="'+EL.tip+'">'+EL.status+'</span>';
   }
   statusEl.innerHTML = '<span class="turn-dot '+dotCls+'"></span>'+(S.think?'<span class="thinking">AI 思考中</span>':'輪到'+who)+extra+aiInfo+eng;
   /* Safari tab title + on-page engine badge */
-  var eb=$('engBadge'), et=$('engTxt');
-  if(S.mode!=='ai'){ eb.className='eng-badge hidden'; document.title='中國象棋 · 雙人格'; }
-  else if(WASM.state==='ready'){ eb.className='eng-badge ready'; et.textContent='⚡ Pikafish'+(WASM.usedEmbedded?'(內置)':''); document.title='中國象棋 · ⚡Pikafish✅'; }
-  else if(WASM.state==='loading'){ eb.className='eng-badge loading'; et.textContent=WASM.netPct>=0?'⚡ '+WASM.netPct+'%':'⚡ 載入中'; document.title='中國象棋 · ⚡'+(WASM.netPct>=0?WASM.netPct+'%':'載入中'); }
-  else if(WASM.state==='failed'){ eb.className='eng-badge failed'; et.textContent='⚠ JS備用'; document.title='中國象棋 · ⚠JS備用'; }
-  else{ eb.className='eng-badge hidden'; }
+  var L=engLabel(), eb=$('engBadge'), et=$('engTxt');
+  if(S.mode!=='ai'){
+    eb.className='eng-badge hidden'; et.textContent=''; eb.removeAttribute('title'); document.title='中國象棋 · 雙人格';
+  } else {
+    eb.className='eng-badge '+L.cls; et.textContent=L.text; eb.title=L.tip;
+    if(WASM.state==='ready') document.title='中國象棋 · ⚡Pikafish✅';
+    else if(WASM.state==='loading') document.title='中國象棋 · ⚡'+(WASM.netPct>=0?WASM.netPct+'%':'載入中');
+    else if(WASM.state==='failed') document.title='中國象棋 · ⚠JS備用';
+  }
+}
+
+/* =====================================================================
+   AI thinking indicator — the strip under the top bar.
+   Shows a spinner + the engine in use + LIVE telemetry (depth / score /
+   nps / elapsed seconds) streamed from the engine worker while it
+   searches. The eval bar animates in step with the engine score.
+   ===================================================================== */
+var thinkStart=0, thinkTimer=null;
+function setThink(on){
+  if(S.think===on){ if(on) pumpThink(); return; }
+  S.think=on;
+  if(on){
+    thinkStart=Date.now();
+    S.thinkInfo=null;
+    tsLabel.textContent=(WASM.state==='ready')? '⚡ AI 思考中 · Pikafish' : 'AI 思考中 · JS 引擎';
+    thinkStripEl.hidden=false;
+    if(thinkTimer) clearInterval(thinkTimer);
+    thinkTimer=setInterval(pumpThink,300);
+    pumpThink();
+  } else {
+    thinkStripEl.hidden=true;
+    S.thinkInfo=null;
+    if(thinkTimer){ clearInterval(thinkTimer); thinkTimer=null; }
+    refreshEval();   // settle the eval bar back on the local value
+  }
+  refreshStatus(); renderTrays();
+}
+/* engine score (cp / mate) is from the SIDE-TO-MOVE (= the AI) perspective;
+   flip to a red-positive value to display it */
+function redCp(inf){
+  if(inf.mate!=null){ var redWins=(S.aiColor===1)? inf.mate>0 : inf.mate<0; return redWins? 100000 : -100000; }
+  var cp=inf.cp!=null? inf.cp : 0;
+  return (S.aiColor===1)? cp : -cp;
+}
+function pumpThink(){
+  if(!S.think) return;
+  var parts=[], inf=S.thinkInfo;
+  if(inf){
+    if(inf.depth!=null) parts.push('深度 '+inf.depth);
+    if(inf.mate!=null){
+      parts.push((redCp(inf)>0? '#'+Math.abs(inf.mate) : '-#'+Math.abs(inf.mate)));
+    } else if(inf.cp!=null){
+      var pc=redCp(inf)/100; parts.push((pc>0?'+':'')+pc.toFixed(1));
+    }
+    if(inf.nps!=null && inf.nps>0){
+      parts.push(inf.nps>=1000000? (inf.nps/1000000).toFixed(1)+'M N/s' : Math.max(1,Math.round(inf.nps/1000))+'k N/s');
+    }
+  }
+  parts.push(((Date.now()-thinkStart)/1000).toFixed(1)+'s');
+  tsMetrics.textContent=parts.join(' · ');
+  /* live eval bar, in step with the engine */
+  if(inf){
+    var rcp=redCp(inf);
+    var frac=(rcp>=100000)? 1 : (rcp<=-100000)? 0 : 1/(1+Math.exp(-rcp/350));
+    evalFill.style.width=(frac*100).toFixed(1)+'%';
+    if(inf.mate!=null) evalNum.textContent=(rcp>0?'+':'-')+'M'+Math.abs(inf.mate);
+    else { var p2=rcp/100; evalNum.textContent=(p2>0?'+':'')+p2.toFixed(1); }
+    evalNum.className=rcp>10? 'red' : (rcp<-10? 'black' : '');
+  }
 }
 
 function refreshEval(){
@@ -995,6 +1120,11 @@ function renderTrays(){
   var tr=document.createElement('span'); tr.className='adv '+(adv>0?'up':adv<0?'down':'');
   tr.textContent = adv>0?(' 紅 +'+adv.toFixed(1)) : adv<0?(' 黑 +'+(-adv).toFixed(1)) : '';
   (adv>=0? capsRed: capsBlack).appendChild(tr);
+  /* pulsing "thinking" tag on the AI's own tray */
+  if(S.mode==='ai' && S.think){
+    var th=document.createElement('span'); th.className='adv think'; th.textContent=' 思考中…';
+    (S.aiColor===1? capsRed : capsBlack).appendChild(th);
+  }
 }
 
 function renderMoveList(){
@@ -1345,6 +1475,7 @@ if (typeof window !== 'undefined' && window.__XQTEST) {
     layout:layout, pointPx:pointPx, boardSquareFromPoint:boardSquareFromPoint, dPos:dPos,
     pliesNoCapture:pliesNoCapture, threefold:threefold, fileNum:fileNum, syncBoard:syncBoard,
     refreshChrome:refreshChrome, drawLines:drawLines, renderMarks:renderMarks, refreshEval:refreshEval,
+    setThink:setThink, engLabel:engLabel, pumpThink:pumpThink,
     endGame:endGame, onDown:onDown, onMove:onMove, onUp:onUp, evSquare:evSquare, moveOf:moveOf,
     legal: function(){ return XQ.genMoves(S.pos, true); },
     count: function(){ var kr=-1,kb=-1,pc=0,b=S.pos.b; for(var s=0;s<90;s++){ if(b[s]===1)kr=s; if(b[s]===-1)kb=s; if(b[s])pc++; } return {kr:kr,kb:kb,pc:pc}; }

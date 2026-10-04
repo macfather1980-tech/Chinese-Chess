@@ -19,6 +19,9 @@
  *
  *  Protocol (worker -> main):
  *    {type:'status', reqId?, phase: 'loading'|'ready'|'failed', msg?, ok?}
+ *    {type:'info',   reqId, depth?, mate?, cp?, nodes?, nps?, timeMs?}
+ *                     (live search progress, throttled — lets the UI show
+ *                      what the engine is doing in real time)
  *    {type:'done',   reqId, move: uciString, mate?, cp?, depth?, nodes?,
  *                    nps?, timeMs?, noMoves?, err?}
  *
@@ -88,10 +91,34 @@ function uciToAppMove(uci) {
 
 /* ---------- stdout: capture engine progress lines ---------- */
 
+/* The UI wants LIVE progress ("AI thinking"): forward each engine info
+   line as a throttled 'info' message. postMessage from inside a blocked
+   (synchronous) search call still reaches the main thread — the message
+   queues to the receiver and is delivered as it arrives, so the stream is
+   effectively real time. Throttle: at most one post per ~120ms, or sooner
+   when the depth just changed (a depth step is the most visible event). */
+var curReqId = 0;        // request id of the search in flight (0 = idle)
+var lastInfoPost = 0, lastInfoDepth = -1;
+
+function streamInfo() {
+  if (!curReqId) return;
+  var o = lastInfo();
+  if (!o || o.depth == null) return;
+  var now = Date.now(), gap = now - lastInfoPost;
+  if (gap < (o.depth !== lastInfoDepth ? 50 : 120)) return;
+  lastInfoDepth = o.depth;
+  lastInfoPost = now;
+  post({ type: 'info', reqId: curReqId, depth: o.depth, mate: o.mate, cp: o.cp,
+         nodes: o.nodes, nps: o.nps, timeMs: o.timeMs });
+}
+
 function onOut(line) {
   line = line.replace(/\s+$/, '');
   if (!line) return;
-  if (line.charAt(0) === 'i' && line.indexOf('info') === 0) infoBuf.push(line);
+  if (line.indexOf('info') === 0) {
+    infoBuf.push(line);
+    streamInfo();
+  }
 }
 
 /* Emscripten calls the Module `stdout` sink with ONE BYTE per call (it
@@ -223,8 +250,11 @@ function doSearch(d) {
     return;
   }
   infoBuf.length = 0;
+  curReqId = d.reqId;                 // arm the live progress stream
+  lastInfoPost = 0; lastInfoDepth = -1;
   var t0 = Date.now();
   cc('wmain_go', 'number', ['number', 'number'], [d.opt.timeMs | 0, d.opt.maxDepth | 0]);
+  curReqId = 0;                       // disarm before the final 'done'
   var elapsed = Date.now() - t0;
 
   var uci = '';

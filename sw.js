@@ -2,6 +2,10 @@
    NOTE: registers only over https or localhost (secure context). On a plain
    http LAN URL the game still runs fully; the SW simply won't activate.
 
+   v5 (2026-10-05-b8) — engine-wasm.js re-shipped (live "info" progress
+   stream so the UI shows the AI thinking in real time); refreshed
+   assets-embedded.js accordingly. Bump for cache refresh on update.
+
    v4 (2026-10-04-b4) — engine re-shipped (search-bridge fixes: movetime
    semantics, stdout byte-sink capture, fflush; identical wasm binary,
    refreshed assets-embedded.js). Bump for cache refresh on update.
@@ -23,7 +27,7 @@
    * Big assets are pre-cached with retries, and any that are missing are
      re-fetched on every activate (self-heals an interrupted first install).
    */
-const CACHE = 'xq-chess-v2-2026-10-04-b7';
+const CACHE = 'xq-chess-v2-2026-10-05-b8';
 const ASSETS = [
   './',
   './index.html',
