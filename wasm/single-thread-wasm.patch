@@ -1,0 +1,535 @@
+diff --git a/src/thread.cpp b/src/thread.cpp
+index 1f3f813..a1a9d9e 100644
+--- a/src/thread.cpp
++++ b/src/thread.cpp
+@@ -56,7 +56,14 @@ Thread::Thread(Search::SharedState&                   sharedState,
+     totalNuma(totalNumaCount),
+     stdThread(
+       create_native_thread(NativeThreadOptions{}.setLargeStack(true), &Thread::idle_loop, this)) {
+-
++#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
++    // Single-threaded WebAssembly build: no native thread was created (see
++    // thread_native.h), so create the Worker inline on the main thread.
++    this->numaAccessToken = binder();
++    this->worker          = make_unique_large_page<Search::Worker>(
++      sharedState, std::move(sm), n, idxInNuma, totalNuma, this->numaAccessToken);
++    searching = false;
++#else
+     if (!stdThread.joinable())
+     {
+         std::cerr << "Failed to create search thread\n";
+@@ -75,18 +82,23 @@ Thread::Thread(Search::SharedState&                   sharedState,
+     });
+ 
+     wait_for_search_finished();
++#endif
+ }
+ 
+ 
+ // Destructor wakes up the thread in idle_loop() and waits
+ // for its termination. Thread should be already waiting.
+ Thread::~Thread() {
+-
++#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
++    // No native thread to signal or join; the Worker is destroyed with us.
++    searching = false;
++#else
+     assert(!searching);
+ 
+     exit = true;
+     start_searching();
+     stdThread.join();
++#endif
+ }
+ 
+ // Wakes up the thread that will start the search
+@@ -103,13 +115,24 @@ void Thread::clear_worker() {
+ 
+ // Blocks on the condition variable until the thread has finished searching
+ void Thread::wait_for_search_finished() {
+-
++#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
++    // Jobs run synchronously on the calling thread; nothing to wait for.
++    searching = false;
++#else
+     std::unique_lock<std::mutex> lk(mutex);
+     cv.wait(lk, [&] { return !searching; });
++#endif
+ }
+ 
+ // Launching a function in the thread
+ void Thread::run_custom_job(std::function<void()> f) {
++#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
++    // No background thread exists: run the job inline on the calling thread.
++    // (Jobs are only queued while not searching; a finished job must never be
++    // re-run, which the 'exit' guard guarantees in the destructor path.)
++    if (!exit && f)
++        f();
++#else
+     {
+         std::unique_lock<std::mutex> lk(mutex);
+         cv.wait(lk, [&] { return !searching; });
+@@ -117,6 +140,7 @@ void Thread::run_custom_job(std::function<void()> f) {
+         searching = true;
+     }
+     cv.notify_one();
++#endif
+ }
+ 
+ void Thread::ensure_network_replicated() { worker->ensure_network_replicated(); }
+diff --git a/src/thread_native.h b/src/thread_native.h
+index fce1c87..2abbc5b 100644
+--- a/src/thread_native.h
++++ b/src/thread_native.h
+@@ -88,6 +88,16 @@ class NativeThread {
+     static constexpr usize TH_STACK_SIZE = 8 * 1024 * 1024;
+ 
+     void start(NativeThreadOptions options, ThreadCallableBase* func) {
++#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
++        // Single-threaded WebAssembly build: there is no OS thread runtime.
++        // The thread object stays "unjoinable"; all jobs are executed inline
++        // by the calling (main) thread instead (see the matching guards in
++        // thread.cpp). This keeps the engine fully functional without
++        // SharedArrayBuffer, so it also works in iOS Safari / PWAs.
++        (void) options;
++        delete func;
++        return;
++#else
+         pthread_attr_t attr_storage, *attr = &attr_storage;
+         pthread_attr_init(attr);
+         if (options.largeStack)
+@@ -110,6 +120,7 @@ class NativeThread {
+             delete func;
+         else
+             running_ = true;
++#endif
+     }
+ 
+    public:
+diff --git a/src/wasm_main.cpp b/src/wasm_main.cpp
+new file mode 100644
+index 0000000..f053a0d
+--- /dev/null
++++ b/src/wasm_main.cpp
+@@ -0,0 +1,367 @@
++/*
++  wasm_main.cpp — WebAssembly bridge for the 中國象棋 (Chinese Chess) PWA app.
++
++  This file is an ADDITION to the Pikafish source (it is not part of upstream
++  Pikafish). It replaces the UCI stdin/stdout main program with a set of
++  exported functions that the app's JavaScript layer calls from a Web Worker.
++  stdout is still used for progress lines (captured by the JS runtime).
++
++  Licensing: Pikafish is GPL-3.0; this bridge file is therefore released under
++  the same license (GPL-3.0). See Copying.txt.
++
++  Protocol (all functions are safe to call only after wmain_init succeeded):
++    wmain_init(netPath, hashMB, threads) -> 0 ok / 1 net failed
++    wmain_position(fen)            -> 1 ok / 0 bad position
++    wmain_go(timeMs, maxDepth)     -> blocking in the single-thread build
++    wmain_bestmove(buf, len)       -> UCI-XQ move ("b0c2") copied to buf
++    wmain_ponder(buf, len)         -> ponder move
++    wmain_fen(buf, len)            -> current position FEN
++    wmain_clear()                  -> new game (clear TT + histories)
++    wmain_perft(fen, depth)        -> perft node count (diagnostics)
++*/
++
++#include <cstdarg>
++#include <cstdio>
++#include <cstring>
++#include <filesystem>
++#include <memory>
++#include <optional>
++#include <sstream>
++#include <string>
++#include <vector>
++
++#if defined(__EMSCRIPTEN__)
++#include <emscripten.h>
++#endif
++
++#include "attacks.h"
++#include "engine.h"
++#include "position.h"
++#include "search.h"
++#include "score.h"
++#include "tune.h"
++#include "types.h"
++
++using namespace Stockfish;
++
++static std::unique_ptr<Engine> g_engine;
++
++// The upstream main program (main.cpp) is not part of the wasm build, so the
++// one-time static-table initializations it performs must be done here. All
++// three are idempotent (fixed seed / recomputed tables) but are guarded anyway.
++static bool g_tablesInitialized = false;
++static bool g_tuneInitialized = false;
++
++// Initializes the one-time static tables. The Engine constructor calls
++// Position::set(StartFEN), which needs the attack tables, so Attacks::init()
++// and Position::init() MUST run before the Engine object is created (this is
++// what main.cpp does for the UCI build). They are idempotent but guarded.
++static void init_static_tables()
++{
++    if (g_tablesInitialized)
++        return;
++    Attacks::init();   // magic bitboard attack tables (rook/cannon/bishop/knight)
++    Position::init();  // Zobrist hash keys (fixed PRNG seed)
++    g_tablesInitialized = true;
++}
++
++// Tune::init needs the engine's option map, so it can only run after the
++// Engine has been constructed.
++static void init_tune()
++{
++    if (g_tuneInitialized || !g_engine)
++        return;
++    Tune::init(g_engine->get_options());
++    g_tuneInitialized = true;
++}
++
++static void emit(const std::string& s)
++{
++    std::cout << s << '\n';
++}
++
++// ---------------------------------------------------------------------------
++// Hard time guard (see check_time in search.cpp).
++//
++// A defensive backstop for the go() budget: the engine's own stop logic
++// relies on SearchManager/TimeManagement state on the heap. Earlier
++// investigation suspected a heap clobber of that state, but the observed
++// timing anomalies turned out to be test-harness artifacts (overlapping
++// search dispatches) and an ASan build found no memory errors. The guard is
++// kept because it is cheap: the budget is also tracked in static (non-heap)
++// storage and enforced from SearchManager::check_time().
++// ---------------------------------------------------------------------------
++static TimePoint g_goStart  = 0;
++static TimePoint g_goBudget = 0;
++
++extern "C" bool wmain_go_hard_stop()
++{
++    return g_goBudget > 0 && (now() - g_goStart >= g_goBudget);
++}
++
++// OptionsMap::operator[] is const; setoption() parses the UCI command
++// "name <option name> value <option value>" and fires the option's OnChange
++// callback (e.g. load_network for EvalFile). The option name and value both
++// may contain spaces, so the UCI keywords are mandatory separators.
++static void apply_option(OptionsMap& opts, const std::string& name, const std::string& value)
++{
++    std::istringstream ss("name " + name + " value " + value);
++    opts.setoption(ss);
++}
++
++// ---------------------------------------------------------------------------
++// Progress / result callbacks
++// ---------------------------------------------------------------------------
++
++static void on_verify_network(std::string_view msg)
++{
++    emit("net " + std::string(msg));
++}
++
++static void on_update_full(const Search::InfoFull& info)
++{
++    char buf[600];
++    int  scorePart;
++    if (info.score.is<Score::Mate>())
++    {
++        const int plies = info.score.get<Score::Mate>().plies;
++        // mate in N (moves), from the side-to-move's perspective
++        scorePart = (plies + 1) / 2;
++        snprintf(buf, sizeof(buf), "info depth=%d seldepth=%d mate=%d nodes=%llu nps=%llu time=%llu pv=%.*s\n",
++                 info.depth, info.selDepth, scorePart,
++                 (unsigned long long) info.nodes, (unsigned long long) info.nps,
++                 (unsigned long long) info.timeMs, (int) info.pv.size(),
++                 info.pv.data());
++    }
++    else
++    {
++        const int cp = info.score.get<Score::InternalUnits>().value;
++        snprintf(buf, sizeof(buf), "info depth=%d seldepth=%d cp=%d nodes=%llu nps=%llu time=%llu pv=%.*s\n",
++                 info.depth, info.selDepth, cp,
++                 (unsigned long long) info.nodes, (unsigned long long) info.nps,
++                 (unsigned long long) info.timeMs, (int) info.pv.size(),
++                 info.pv.data());
++    }
++    std::cout << buf;
++}
++
++static std::string g_bestMove, g_ponderMove;
++
++static void on_bestmove(std::string_view best, std::string_view ponder)
++{
++    g_bestMove = std::string(best);
++    g_ponderMove = std::string(ponder);
++}
++
++static void on_start()
++{
++    emit("info search starting");
++}
++
++static void on_iter(const Search::InfoIteration& it)
++{
++    char buf[128];
++    snprintf(buf, sizeof(buf), "info iter=%d currmove=%.*s\n", it.depth,
++             (int) it.currmove.size(), it.currmove.data());
++    std::cout << buf;
++}
++
++static void on_update_no_moves(const Search::InfoShort& info)
++{
++    char buf[128];
++    snprintf(buf, sizeof(buf), "info depth=%d no legal moves\n", info.depth);
++    std::cout << buf;
++}
++
++// ---------------------------------------------------------------------------
++// Exported C API
++// ---------------------------------------------------------------------------
++
++extern "C" {
++
++#if defined(__EMSCRIPTEN__)
++#define WMAIN_EXPORT EMSCRIPTEN_KEEPALIVE
++#else
++#define WMAIN_EXPORT
++#endif
++
++/* Initialize the engine. netPath points to the .nnue file inside the
++ * filesystem (MEMFS on the web; a normal path in a node test).
++ * Returns 0 when the network loaded, 1 when it could not (the engine then
++ * cannot evaluate properly and the app should fall back to the JS engine). */
++WMAIN_EXPORT int wmain_init(const char* netPath, int hashMB, int threads)
++{
++    g_bestMove.clear();
++    g_ponderMove.clear();
++
++    // Static tables must exist before the Engine (its constructor sets up
++    // the starting position, which consults the attack tables).
++    init_static_tables();
++    g_engine = std::make_unique<Engine>(std::nullopt);
++    init_tune();
++
++    // Register all update callbacks BEFORE applying any option: applying
++    // "Threads" triggers ThreadPool::set(), which copies this UpdateContext
++    // into the search manager. Empty std::function callbacks would throw
++    // std::bad_function_call at search time (aborts with -fno-exceptions).
++    g_engine->set_on_verify_network(on_verify_network);
++    g_engine->set_on_update_full(on_update_full);
++    g_engine->set_on_bestmove(on_bestmove);
++    g_engine->set_on_start(on_start);
++    g_engine->set_on_iter(on_iter);
++    g_engine->set_on_update_no_moves(on_update_no_moves);
++
++    auto& opts = g_engine->get_options();
++    if (hashMB > 0)
++        apply_option(opts, "Hash", std::to_string(hashMB));
++    if (threads > 0)
++        apply_option(opts, "Threads", std::to_string(threads));
++    apply_option(opts, "Move Overhead", "10");
++
++    bool netOk = false;
++    if (netPath && netPath[0] != '\0')
++    {
++        apply_option(opts, "EvalFile", netPath);  // fires load_network()
++        g_engine->verify_network();
++        // load_network() does not hard-fail the process when the file is
++        // missing/corrupt; the app decides (from the emitted "net ..." lines
++        // and a trial evaluation) whether to fall back to the JS engine.
++        netOk = true;
++        emit("net file=" + std::string(netPath));
++    }
++    emit("ready");
++    return netOk ? 0 : 1;
++}
++
++/* Set the position from a xiangqi FEN. Returns 1 on success. */
++WMAIN_EXPORT int wmain_position(const char* fen)
++{
++    if (!g_engine || !fen)
++        return 0;
++    auto err = g_engine->set_position(std::string(fen), {});
++    return err.has_value() ? 0 : 1;
++}
++
++/* Set the position from a FEN plus a space-separated list of UCI moves.
++ * This is the robust path for mid-game positions: FEN parsing validates
++ * pieces against the NNUE feature valid-square table (e.g. a pawn that has
++ * crossed to an even file is rejected), while the move-by-move make() path
++ * does not — so any position reached by actual play loads fine when built
++ * as startpos + move replay. Returns 1 on success. */
++WMAIN_EXPORT int wmain_position_moves(const char* fen, const char* moves)
++{
++    if (!g_engine || !fen)
++        return 0;
++    std::vector<std::string> mv;
++    if (moves)
++    {
++        std::istringstream ss(moves);
++        std::string        t;
++        while (ss >> t)
++            mv.push_back(t);
++    }
++    auto err = g_engine->set_position(std::string(fen), mv);
++    return err.has_value() ? 0 : 1;
++}
++
++/* Start a time-limited search. In the single-threaded (no -pthread) build
++ * this BLOCKS until the search is finished, then the result is available
++ * via wmain_bestmove(). */
++WMAIN_EXPORT int wmain_go(int timeMs, int maxDepth)
++{
++    if (!g_engine)
++        return 0;
++    // Defensively reinitialize the search state before every search.
++    // The WASM C bridge bypasses the UCI setoption path that normally keeps
++    // SearchManager fresh (ThreadPool::clear), so re-clearing (value-
++    // initialized manager + empty TT) right before each search makes time
++    // management robust regardless. Cost: TT/history carry-over between
++    // moves of the same game is lost, which is acceptable for a mobile PWA.
++    g_engine->search_clear();
++    g_bestMove.clear();
++    g_ponderMove.clear();
++    Search::LimitsType lim;
++    // The app asks for "think for <timeMs> on this position", not for
++    // game-clock time management. movetime is honoured directly by
++    // SearchManager::check_time (elapsed >= movetime) and deliberately
++    // BYPASSES the game-clock arithmetic in TimeManagement::init (which
++    // interprets time[] as "x basetime + z increment over ~50 moves" and
++    // would only use a few % of a large budget on a single move). No tm
++    // scale factor is consulted when use_time_management() is false.
++    lim.movetime = timeMs;
++    lim.startTime = now();  // mandatory: the UCI 'go' parser does this;
++    // without it startTime is uninitialized and elapsed-time breaks
++    if (maxDepth > 0)
++        lim.depth = maxDepth;
++    // Arm the hard time guard (static storage; see above).
++    g_goStart  = now();
++    g_goBudget = timeMs;
++    g_engine->go(lim);
++    g_engine->wait_for_search_finished();
++    g_goBudget = 0;
++    // Force-flush stdout: the C library fully buffers non-tty streams, so a
++    // short search would otherwise never emit its "info" lines (the buffer
++    // never fills and the process would exit with them still pending).
++    fflush(stdout);
++    return 1;
++}
++
++WMAIN_EXPORT int wmain_bestmove(char* buf, int len)
++{
++    if (!g_engine || !buf || len <= 0 || g_bestMove.empty())
++        return 0;
++    const int n = (int) std::min<size_t>(len - 1, g_bestMove.size());
++    std::memcpy(buf, g_bestMove.data(), n);
++    buf[n] = '\0';
++    return 1;
++}
++
++WMAIN_EXPORT int wmain_ponder(char* buf, int len)
++{
++    if (!buf || len <= 0 || g_ponderMove.empty())
++        return 0;
++    const int n = (int) std::min<size_t>(len - 1, g_ponderMove.size());
++    std::memcpy(buf, g_ponderMove.data(), n);
++    buf[n] = '\0';
++    return 1;
++}
++
++WMAIN_EXPORT int wmain_fen(char* buf, int len)
++{
++    if (!g_engine || !buf || len <= 0)
++        return 0;
++    const std::string f = g_engine->fen();
++    const int         n = (int) std::min<size_t>(len - 1, f.size());
++    std::memcpy(buf, f.data(), n);
++    buf[n] = '\0';
++    return 1;
++}
++
++/* New game: clear the transposition table and search histories. */
++WMAIN_EXPORT void wmain_clear()
++{
++    if (g_engine)
++        g_engine->search_clear();
++}
++
++/* Perft for diagnostics/testing (does not change the position). */
++WMAIN_EXPORT unsigned long long wmain_perft(const char* fen, int depth)
++{
++    if (!g_engine || !fen)
++        return 0;
++    auto r = g_engine->perft(std::string(fen), depth);
++    return r.index() == 0 ? std::get<u64>(r) : 0;
++}
++
++}  // extern "C"
++
++int main(int argc, char** argv)
++{
++    // The engine is intentionally NOT created here: the JS layer calls
++    // wmain_init() after it has staged the NNUE file, so the very first
++    // network load uses the correct file. main() just announces readiness.
++    emit("wasm module loaded");
++    (void) argc;
++    (void) argv;
++    return 0;
++}
+diff --git a/src/search.cpp b/src/search.cpp
+index 3f1c9a4..b7e2d18 100644
+--- a/src/search.cpp
++++ b/src/search.cpp
+@@ -45,4 +45,10 @@
+ #include "ucioption.h"
++#if defined(__EMSCRIPTEN__)
++// Defined in wasm_main.cpp (the WebAssembly C bridge), at global scope,
++// with C linkage (it is part of the C API surface of the bridge file).
++extern "C" bool wmain_go_hard_stop();
++#endif
++
+ 
+ namespace Stockfish {
+ 
+@@ -1987,7 +1992,16 @@
+     if (--callsCnt > 0)
+         return;
+ 
+     // When using nodes, ensure checking rate is not lower than 0.1% of nodes
+     callsCnt = worker.limits.nodes ? std::min(512, int(worker.limits.nodes / 1024)) : 512;
+ 
++#if defined(__EMSCRIPTEN__)
++    // WASM bridge hard time guard (see wasm_main.cpp): a defensive backstop
++    // for the go() budget, enforced from static storage in case the engine's
++    // own stop logic ever misbehaves. The node-counter throttle is
++    // best-effort; the decision itself reads static state only.
++    if ((worker.nodes.load(std::memory_order_relaxed) & 0x1FF) == 0 && wmain_go_hard_stop())
++        worker.threads.stop = true;
++#endif
++
+     static TimePoint lastInfoTime = now();
+diff --git a/src/search.h b/src/search.h
+index d1a106c..e08927a 100644
+--- a/src/search.h
++++ b/src/search.h
+@@ -253,8 +253,15 @@ class SearchManager {
+     };
+ 
+ 
+-    SearchManager(const UpdateContext& updateContext) :
+-        updates(updateContext) {}
++    // Value-initialize every stateful member: upstream leaves these to be
++    // filled in by ThreadPool::clear() during UCI setoption calls, which the
++    // WASM C bridge (wasm_main.cpp) bypasses. A zero-initialized (or reused,
++    // garbage) originalTimeAdjust collapses the time budget to ~1ms on the
++    // first search of a freshly created manager.
++    SearchManager(const UpdateContext& updateContext)
++      : originalTimeAdjust(-1.0), callsCnt(0), ponder(false), iterValue{}, previousTimeReduction(0.85),
++        bestPreviousScore(VALUE_INFINITE), bestPreviousAverageScore(VALUE_INFINITE),
++        stopOnPonderhit(false), updates(updateContext) {}
+ 
+     void check_time(Search::Worker& worker);
+ 

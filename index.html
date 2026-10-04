@@ -1,0 +1,1316 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>中國象棋 · 專業 AI 對弈</title>
+
+<!-- PWA -->
+<meta name="theme-color" content="#241a12">
+<meta name="description" content="有水準、有難度的中國象棋（Xiangqi）：真實規則、強悍 AI、木質棋盤。">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="中國象棋">
+
+<style>
+/* =====================================================================
+   Theme
+   ===================================================================== */
+:root{
+  --bg-0:#211611; --bg-1:#2b1d14;
+  --wood-0:#e9c48c; --wood-1:#d9ad72; --wood-2:#c8985c;
+  --line:#5c4326;
+  --ink-red:#b83324; --ink-red-soft:#cf5a48;
+  --ink-black:#241f1a;
+  --piece-ivory:#f6ecd6;
+  --gold:#e7c27d; --gold-2:#f3d79a;
+  --panel:#31231a; --panel-2:#3b2a1e; --panel-3:#452f20;
+  --text:#f0e6d4; --text-dim:#c3b096;
+  --check:#e23b2e;
+  --good:#7bbf6a; --bad:#d4604e;
+  --radius:14px;
+  --cell:70px;               /* piece sizing, set in JS */
+  --shadow:0 8px 22px rgba(0,0,0,.45);
+}
+*{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none; }
+html,body{ margin:0; height:100%; }
+body{
+  font-family:"Kaiti TC","Kaiti SC","STKaiti","DFKai-SB","Noto Serif TC","Songti TC","PingFang TC",serif;
+  color:var(--text);
+  background:
+    radial-gradient(1200px 700px at 50% -10%, #3a2717 0%, var(--bg-1) 45%, var(--bg-0) 100%);
+  overflow:hidden;
+  touch-action:none;
+  user-select:none;
+  -webkit-user-select:none;
+}
+button{ font-family:inherit; color:inherit; cursor:pointer; }
+
+/* =====================================================================
+   App frame
+   ===================================================================== */
+#app{ position:fixed; inset:0; display:flex; flex-direction:column; padding:
+  calc(env(safe-area-inset-top) + 6px) max(5px, env(safe-area-inset-right))
+  calc(env(safe-area-inset-bottom)*0.55 + 6px) max(5px, env(safe-area-inset-left)); gap:6px; }
+
+header.topbar{
+  display:flex; align-items:center; gap:6px;
+  background:linear-gradient(180deg,var(--panel-3),var(--panel));
+  border:1px solid #1c130c; border-radius:var(--radius);
+  padding:6px 10px; box-shadow:var(--shadow); min-height:44px;
+}
+.brand{ display:flex; flex-direction:column; line-height:1.05; }
+.brand b{ font-size:1.15rem; letter-spacing:.06em; color:var(--gold-2); }
+.brand small{ font-size:.62rem; color:var(--text-dim); letter-spacing:.28em; }
+.status{ flex:1; text-align:center; font-size:.92rem; color:var(--text); min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.status .turn-dot{ display:inline-block; width:.7em; height:.7em; border-radius:50%; vertical-align:middle; margin:0 .35em; box-shadow:0 0 8px rgba(0,0,0,.4); }
+.turn-red{ background:var(--ink-red); box-shadow:0 0 10px var(--ink-red) !important; }
+.turn-black{ background:#111; box-shadow:0 0 0 1px #555,0 0 8px rgba(0,0,0,.6) !important; }
+.thinking{ font-style:italic; color:var(--gold); }
+.thinking::after{ content:""; display:inline-block; width:1em; text-align:left; animation:dots 1.2s steps(4,end) infinite; }
+@keyframes dots{ 0%{content:""} 25%{content:"."} 50%{content:".."} 75%{content:"..."} }
+.iconbtn{ background:var(--panel-2); border:1px solid #1c130c; border-radius:10px; padding:6px 9px; font-size:.82rem; color:var(--text); }
+.iconbtn:active{ transform:translateY(1px); }
+.iconbtn.on{ background:linear-gradient(180deg,var(--gold-2),var(--gold)); color:#3a2410; font-weight:700; }
+
+/* ---- main column: board row, then trays, then controls ---- */
+.main{ flex:1; display:flex; flex-direction:column; gap:6px; min-height:0; min-width:0; }
+.board-row{ flex:1; min-height:0; min-width:0; display:flex; justify-content:center; gap:6px; } /* align-items defaults to stretch → boardArea gets a definite height */
+
+/* eval (compact gauge in the top bar — keeps the board at full width) */
+.evalmini{ display:flex; align-items:center; gap:6px; flex:none; }
+.evalmini-bar{ position:relative; width:72px; height:7px; border-radius:5px; overflow:hidden;
+  background:#1a1512; border:1px solid #15100b; box-shadow:inset 0 0 6px rgba(0,0,0,.6); }
+#evalFill{ position:absolute; left:0; top:0; bottom:0; width:50%;
+  background:linear-gradient(90deg,var(--ink-red),var(--ink-red-soft)); transition:width .5s cubic-bezier(.2,.7,.2,1); }
+.evalmini-bar .evalmid{ position:absolute; left:50%; top:0; bottom:0; width:1px; background:var(--gold); opacity:.85; }
+#evalNum{ font-size:.62rem; color:var(--text-dim); min-width:2.4em; text-align:right; }
+#evalNum.red{ color:var(--ink-red-soft); }
+#evalNum.black{ color:#e8e2d6; }
+
+/* board */
+#boardArea{ flex:1; min-height:0; min-width:0; display:flex; align-items:center; justify-content:center; }
+#boardFrame{
+  position:relative;
+  background:
+    radial-gradient(120% 90% at 30% 15%, rgba(255,255,255,.18), transparent 55%),
+    linear-gradient(155deg,var(--wood-0),var(--wood-1) 55%,var(--wood-2));
+  border-radius:18px; box-shadow:var(--shadow), inset 0 0 0 3px rgba(92,67,38,.35), inset 0 0 40px rgba(120,80,40,.25);
+  overflow:hidden; touch-action:none;
+}
+#boardFrame::before{ /* subtle wood grain */
+  content:""; position:absolute; inset:0; pointer-events:none; opacity:.16; mix-blend-mode:multiply;
+  background:repeating-linear-gradient(100deg, rgba(120,72,32,.5) 0 2px, transparent 2px 7px, rgba(90,52,22,.4) 7px 9px, transparent 9px 15px);
+}
+#lines{ position:absolute; inset:0; width:100%; height:100%; }
+#pieces,#marks{ position:absolute; inset:0; }
+#marks{ pointer-events:none; }
+
+/* pieces */
+.piece{
+  position:absolute; width:calc(var(--cell)*.92); height:calc(var(--cell)*.92);
+  margin-left:calc(var(--cell)*-.46); margin-top:calc(var(--cell)*-.46);
+  border-radius:50%; display:flex; align-items:center; justify-content:center;
+  font-size:calc(var(--cell)*.52); line-height:1; font-weight:700;
+  background:
+    radial-gradient(circle at 34% 28%, #fffaf0 0%, var(--piece-ivory) 46%, #e4d1a8 78%, #cbb27f 100%);
+  box-shadow:0 5px 9px rgba(0,0,0,.42), inset 0 -3px 6px rgba(150,110,60,.4), inset 0 3px 5px rgba(255,255,255,.7);
+  border:1.5px solid rgba(120,80,40,.55);
+  transition:left .16s cubic-bezier(.3,.8,.3,1), top .16s cubic-bezier(.3,.8,.3,1), transform .12s;
+  will-change:left,top; z-index:2;
+}
+.piece.red{ color:var(--ink-red); text-shadow:0 1px 0 rgba(255,255,255,.5); }
+.piece.black{ color:var(--ink-black); text-shadow:0 1px 0 rgba(255,255,255,.5); }
+.piece.sel{ box-shadow:0 6px 12px rgba(0,0,0,.5), inset 0 0 0 3px var(--gold-2), 0 0 16px 3px rgba(231,194,125,.8); transform:scale(1.07); z-index:6; }
+.piece.lift{ transform:scale(1.12); box-shadow:0 14px 20px rgba(0,0,0,.55), inset 0 0 0 2px rgba(120,80,40,.6); z-index:8; }
+.piece.pop{ animation:pop .22s ease; }
+@keyframes pop{ 0%{transform:scale(.6);opacity:.3} 60%{transform:scale(1.12)} 100%{transform:scale(1)} }
+.piece.captured{ animation:cap .35s ease forwards; }
+@keyframes cap{ 0%{opacity:1;transform:scale(1)} 100%{opacity:0;transform:scale(.2) rotate(90deg)} }
+.piece.hint-from{ box-shadow:0 0 0 3px var(--good), 0 0 16px 4px rgba(123,191,106,.7); }
+.piece.hint-to{ box-shadow:0 0 0 3px var(--gold-2), 0 0 18px 5px rgba(231,194,125,.8); }
+
+/* marks */
+.mark{ position:absolute; border-radius:50%; transform:translate(-50%,-50%); pointer-events:none; }
+.mark.dot{ width:calc(var(--cell)*.22); height:calc(var(--cell)*.22); background:rgba(60,110,50,.85); box-shadow:0 0 6px rgba(0,0,0,.3); }
+.mark.ring{ width:calc(var(--cell)*.92); height:calc(var(--cell)*.92); border:3px solid rgba(210,60,40,.9); background:transparent; box-shadow:0 0 8px rgba(210,60,40,.5); }
+.mark.last{ width:calc(var(--cell)*.9); height:calc(var(--cell)*.9); border:2px solid rgba(231,194,125,.55); background:rgba(231,194,125,.14); }
+.mark.chk{ width:calc(var(--cell)*.96); height:calc(var(--cell)*.96); border:3px solid var(--check); background:rgba(226,59,46,.22); animation:chk 0.9s ease-in-out infinite; z-index:3; }
+@keyframes chk{ 0%,100%{ box-shadow:0 0 6px rgba(226,59,46,.5); transform:translate(-50%,-50%) scale(1); } 50%{ box-shadow:0 0 18px 4px rgba(226,59,46,.8); transform:translate(-50%,-50%) scale(1.06);} }
+
+/* ---- bottom: trays + controls + move list ---- */
+.trays{ flex:none; display:flex; justify-content:space-between; align-items:center; gap:6px; padding:1px 4px; }
+.tray{ flex:1; display:flex; flex-wrap:wrap; align-items:center; gap:2px; min-height:28px; }
+.tray .lbl{ font-size:.68rem; color:var(--text-dim); margin-right:2px; }
+.tray .cap{ font-size:.78rem; width:21px; height:21px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; background:var(--panel-2); border:1px solid #1c130c; }
+.tray .cap.red{ color:var(--ink-red); } .tray .cap.black{ color:#e8e2d6; }
+.tray .adv{ margin-left:6px; font-size:.72rem; font-weight:700; }
+.tray .adv.up{ color:var(--good); } .tray .adv.down{ color:var(--bad); }
+
+.controls{ flex:none; display:flex; flex-direction:column; gap:6px; align-items:center; justify-content:center; }
+.seg{ display:flex; background:var(--panel); border:1px solid #1c130c; border-radius:11px; overflow:hidden; }
+.seg button{ background:transparent; border:0; padding:6px 10px; font-size:.78rem; color:var(--text-dim); border-right:1px solid #1c130c; }
+.seg button:last-child{ border-right:0; }
+.seg button.on{ background:linear-gradient(180deg,var(--gold-2),var(--gold)); color:#3a2410; font-weight:700; }
+.ctlbtn{ background:var(--panel-2); border:1px solid #1c130c; border-radius:10px; padding:6px 11px; font-size:.8rem; }
+.ctlbtn:active{ transform:translateY(1px); }
+.ctlbtn:disabled{ opacity:.4; }
+
+.movelist{ background:var(--panel); border:1px solid #1c130c; border-radius:11px; padding:6px 10px; height:58px; overflow:auto; }
+.movelist .mrow{ display:flex; gap:10px; font-size:.86rem; padding:1px 0; }
+.movelist .mnum{ width:1.6em; text-align:right; color:var(--text-dim); flex:none; }
+.movelist .mc{ flex:0 0 42%; color:var(--text); }
+.movelist .mc.chk{ color:var(--check); font-weight:700; }
+.movelist .empty{ color:var(--text-dim); font-style:italic; }
+
+/* ---- overlays ---- */
+.overlay{ position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center;
+  background:rgba(18,12,8,.72); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); padding:18px; }
+.overlay[hidden]{ display:none; }
+.dlg{ width:100%; max-width:360px; background:linear-gradient(180deg,var(--panel-3),var(--panel));
+  border:1px solid #15100b; border-radius:20px; box-shadow:var(--shadow); padding:22px 20px; text-align:center; }
+.dlg h1{ margin:0; font-size:2.1rem; letter-spacing:.18em; color:var(--gold-2); }
+.dlg .sub{ margin:2px 0 16px; color:var(--text-dim); font-size:.82rem; letter-spacing:.24em; }
+.dlg label{ display:block; text-align:left; font-size:.8rem; color:var(--text-dim); margin:14px 2px 6px; }
+.dlg .seg{ width:100%; } .dlg .seg button{ flex:1; text-align:center; }
+.bigbtn{ width:100%; margin-top:8px; padding:13px; border:0; border-radius:13px; font-size:1.05rem; font-weight:700;
+  background:linear-gradient(180deg,var(--gold-2),var(--gold)); color:#3a2410; letter-spacing:.1em; }
+.bigbtn:active{ transform:translateY(1px); }
+.bigbtn.ghost{ background:var(--panel-2); color:var(--text); border:1px solid #1c130c; }
+#ovResult{ font-size:1.7rem; margin-bottom:4px; }
+#ovResult.red{ color:var(--ink-red-soft); } #ovResult.black{ color:#efe9db; } #ovResult.draw{ color:var(--gold-2); }
+#ovReason{ color:var(--text-dim); font-size:.95rem; margin-bottom:16px; }
+
+/* narrow / landscape */
+@media (max-height:560px){ .movelist{ height:48px; } .tray{ min-height:24px; } }
+@media (min-width:900px){
+  #app{ max-width:860px; margin:0 auto; }
+  .movelist{ height:110px; }
+}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <header class="topbar">
+    <div class="brand"><b>中國象棋</b><small>XIANGQI · AI</small></div>
+    <div class="status" id="status">準備開始</div>
+    <div class="evalmini" title="子力評估"><div class="evalmini-bar"><div id="evalFill"></div><div class="evalmid"></div></div><span id="evalNum">0.0</span></div>
+    <button class="iconbtn" id="btnSound" title="音效">🔊</button>
+    <button class="iconbtn" id="btnMenu" title="主選單">☰</button>
+  </header>
+
+  <div class="main">
+    <div class="board-row">
+      <div id="boardArea">
+        <div id="boardFrame">
+          <svg id="lines" viewBox="-75 -75 950 1050" preserveAspectRatio="xMidYMid meet"></svg>
+          <div id="marks"></div>
+          <div id="pieces"></div>
+        </div>
+      </div>
+    </div>
+    <div class="trays">
+      <div class="tray" id="trayRed"><span class="lbl">紅方取子</span><span class="caps" id="capsRed"></span></div>
+      <div class="tray" id="trayBlack"><span class="lbl">黑方取子</span><span class="caps" id="capsBlack"></span></div>
+    </div>
+    <div class="controls">
+      <div class="seg" id="diffSel"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;">
+        <button class="ctlbtn" id="btnUndo">悔棋</button>
+        <button class="ctlbtn" id="btnHint">提示</button>
+        <button class="ctlbtn" id="btnFlip">翻轉</button>
+        <button class="ctlbtn" id="btnRestart">重開</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="movelist" id="moveList"></div>
+</div>
+
+<!-- menu -->
+<div id="menu" class="overlay">
+  <div class="dlg">
+    <h1>中國象棋</h1>
+    <div class="sub">X I A N G Q I</div>
+    <label>難度</label>
+    <div class="seg" id="mDiff"></div>
+    <label>對弈模式</label>
+    <div class="seg" id="mMode">
+      <button data-mode="ai" class="on">與 AI 對弈</button>
+      <button data-mode="2p">雙人同屏</button>
+    </div>
+    <label id="colorLabel">選擇棋子</label>
+    <div class="seg" id="mColor">
+      <button data-color="1" class="on">紅方</button>
+      <button data-color="-1">黑方</button>
+    </div>
+    <button class="bigbtn" id="mStart">開始對局</button>
+    <button class="bigbtn ghost" id="mContinue" hidden>繼續上局</button>
+  </div>
+</div>
+
+<!-- game over -->
+<div id="overlay" class="overlay" hidden>
+  <div class="dlg">
+    <div id="ovResult">紅方勝</div>
+    <div id="ovReason">將死</div>
+    <button class="bigbtn" id="ovAgain">再下一局</button>
+    <button class="bigbtn ghost" id="ovMenu">回主選單</button>
+  </div>
+</div>
+
+<script src="engine.js"></script>
+<script>
+/* =====================================================================
+   中國象棋 — UI
+   ===================================================================== */
+(function(){
+'use strict';
+
+/* ---- constants (fact-checked: traditional characters) ---- */
+var RED = {1:'帥',2:'仕',3:'相',4:'傌',5:'俥',6:'炮',7:'兵'};
+var BLK = {1:'將',2:'士',3:'象',4:'馬',5:'車',6:'砲',7:'卒'};
+var REDNAME={1:'帥',2:'仕',3:'相',4:'傌',5:'俥',6:'炮',7:'兵'};
+var CN = ['一','二','三','四','五','六','七','八','九'];
+/* timeMs = real time budget (the binding limit); maxDepth is only a safety
+   ceiling well above what the budget can reach, so search runs on time. */
+var DIFF = [
+  {name:'新手', timeMs:800,  maxDepth:8,  blunder:0.30, book:0.25},
+  {name:'普通', timeMs:2200, maxDepth:14, blunder:0.06, book:0.5},
+  {name:'高手', timeMs:4200, maxDepth:18, blunder:0.0,  book:0.8},
+  {name:'大師', timeMs:8000, maxDepth:26, blunder:0.0,  book:0.9}
+];
+var VM = 75;                 // svg label margin (units)
+var CELL = 100;              // svg grid cell (units)
+var NOCAP_LIMIT = 120;       // official natural-limit rule: 60 consecutive rounds (120 plies) without a capture
+
+/* ---- state ---- */
+var S = {
+  pos:null, moves:[], hist:[], notations:[], posHist:[],
+  mode:'ai', humanColor:1, aiColor:-1, diff:2,
+  redOnBottom:true, selected:-1, legal:[], lastMove:null, lastDepth:null,
+  gameOver:false, result:null, sound:true,
+  nodes:[], sqNode:null, scale:1, dragging:false, think:false
+};
+
+/* ---- DOM ---- */
+var $ = function(id){ return document.getElementById(id); };
+var boardFrame=$('boardFrame'), lines=$('lines'), piecesEl=$('pieces'), marksEl=$('marks');
+var statusEl=$('status'), evalFill=$('evalFill'), evalNum=$('evalNum');
+var moveListEl=$('moveList'), capsRed=$('capsRed'), capsBlack=$('capsBlack');
+var menuEl=$('menu'), overlayEl=$('overlay');
+
+/* =====================================================================
+   Sound (WebAudio synthesized)
+   ===================================================================== */
+var AC=null;
+function audio(){ if(!AC){ try{ AC=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+  if(AC && AC.state==='suspended') AC.resume(); return AC; }
+function tone(freq,dur,type,vol,delay){ var ac=audio(); if(!ac||!S.sound) return;
+  var t=ac.currentTime+(delay||0), o=ac.createOscillator(), g=ac.createGain();
+  o.type=type||'sine'; o.frequency.value=freq; o.connect(g); g.connect(ac.destination);
+  var v=vol||0.18; g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(v,t+0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur); o.start(t); o.stop(t+dur+0.03); }
+function thud(dur,vol,cut,delay){ var ac=audio(); if(!ac||!S.sound) return;
+  var t=ac.currentTime+(delay||0), n=Math.floor(ac.sampleRate*dur), buf=ac.createBuffer(1,n,ac.sampleRate), d=buf.getChannelData(0);
+  for(var i=0;i<n;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/n,1.8);
+  var s=ac.createBufferSource(); s.buffer=buf; var f=ac.createBiquadFilter(); f.type='lowpass'; f.frequency.value=cut||1100;
+  var g=ac.createGain(); g.gain.value=vol||0.3; s.connect(f); f.connect(g); g.connect(ac.destination); s.start(t); }
+var sfx={
+  move:function(){ thud(0.07,0.22,900); tone(190,0.06,'triangle',0.10); },
+  capture:function(){ thud(0.12,0.34,720); tone(150,0.10,'sine',0.14); },
+  check:function(){ tone(680,0.12,'sine',0.13); tone(920,0.14,'sine',0.10,0.06); },
+  win:function(){ tone(523,0.12,'triangle',0.2); tone(659,0.12,'triangle',0.2,0.12); tone(784,0.24,'triangle',0.22,0.24); },
+  lose:function(){ tone(392,0.16,'triangle',0.16); tone(311,0.22,'triangle',0.15,0.16); },
+  draw:function(){ tone(440,0.16,'sine',0.13); tone(440,0.16,'sine',0.10,0.18); }
+};
+
+/* =====================================================================
+   Coordinates
+   ===================================================================== */
+function sq(r,c){ return r*9+c; }
+function row(s){ return s/9|0; }
+function col(s){ return s%9; }
+function fileNum(color,c){ return color===1 ? 9-c : c+1; }   // each side's own right = 1
+function dPos(s){ var r=row(s), c=col(s);
+  var dr = S.redOnBottom? r : 9-r;
+  var dc = S.redOnBottom? c : 8-c;
+  return {r:dr,c:dc}; }
+function pointPx(dr,dc){ return { x:(dc*CELL+VM)*S.scale, y:(dr*CELL+VM)*S.scale }; }
+function boardSquareFromPoint(px,py){ // px,py relative to boardFrame
+  var ux = px/S.scale - VM, uy = py/S.scale - VM;
+  var dc = Math.round(ux/CELL), dr = Math.round(uy/CELL);
+  if(dr<0||dr>9||dc<0||dc>8) return -1;
+  var r = S.redOnBottom? dr : 9-dr;
+  var c = S.redOnBottom? dc : 8-dc;
+  return sq(r,c);
+}
+
+/* =====================================================================
+   Board lines (SVG) — static grid + palaces + river + star points + labels
+   ===================================================================== */
+function star(x,y){ var a=9; return '<g stroke="'+css('--line')+'" stroke-width="2.4" opacity=".8">'
+  +'<line x1="'+(x-a)+'" y1="'+y+'" x2="'+(x-3)+'" y2="'+y+'"/><line x1="'+(x+3)+'" y2="'+y+'" x2="'+(x+a)+'" y2="'+y+'"/>'
+  +'<line x1="'+x+'" y1="'+(y-a)+'" x2="'+x+'" y2="'+(y-3)+'"/><line x1="'+x+'" y1="'+(y+3)+'" x2="'+x+'" y2="'+(y+a)+'"/></g>'; }
+function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+
+function drawLines(){
+  var L='#5c4326', W=800, H=900, p='';
+  function pt(c,r){ return (c*100)+','+(r*100); }
+  // outer border
+  p+='<rect x="0" y="0" width="'+W+'" height="'+H+'" fill="none" stroke="'+L+'" stroke-width="4"/>';
+  // horizontal lines (10)
+  for(var r=0;r<10;r++) p+='<line x1="0" y1="'+(r*100)+'" x2="'+W+'" y2="'+(r*100)+'" stroke="'+L+'" stroke-width="2"/>';
+  // vertical lines (9): outer full, inner broken by river
+  for(var c=0;c<9;c++){
+    if(c===0||c===8) p+='<line x1="'+(c*100)+'" y1="0" x2="'+(c*100)+'" y2="'+H+'" stroke="'+L+'" stroke-width="2"/>';
+    else { p+='<line x1="'+(c*100)+'" y1="0" x2="'+(c*100)+'" y2="400" stroke="'+L+'" stroke-width="2"/>';
+           p+='<line x1="'+(c*100)+'" y1="500" x2="'+(c*100)+'" y2="'+H+'" stroke="'+L+'" stroke-width="2"/>'; }
+  }
+  // palaces (diagonals)
+  p+='<line x1="300" y1="0" x2="500" y2="200" stroke="'+L+'" stroke-width="2"/><line x1="500" y1="0" x2="300" y2="200" stroke="'+L+'" stroke-width="2"/>';
+  p+='<line x1="300" y1="700" x2="500" y2="900" stroke="'+L+'" stroke-width="2"/><line x1="500" y1="700" x2="300" y2="900" stroke="'+L+'" stroke-width="2"/>';
+  // star points (cannon + pawn start squares)
+  var stars=[[2,1],[2,7],[7,1],[7,7],[6,0],[6,2],[6,4],[6,6],[6,8],[3,0],[3,2],[3,4],[3,6],[3,8]];
+  for(var i=0;i<stars.length;i++) p+=star(stars[i][1]*100, stars[i][0]*100);
+  // river text
+  p+='<text x="200" y="462" font-size="66" fill="'+L+'" opacity=".55" text-anchor="middle" font-family="Kaiti TC,STKaiti,serif" letter-spacing="10">楚 河</text>';
+  p+='<text x="600" y="462" font-size="66" fill="'+L+'" opacity=".55" text-anchor="middle" font-family="Kaiti TC,STKaiti,serif" letter-spacing="10">漢 界</text>';
+  // file labels (depend on which side is at bottom)
+  var bot = S.redOnBottom? 1 : -1, top = -bot;
+  var tlab='';
+  for(var c2=0;c2<9;c2++){
+    var topNum = c2+1;                 // top side: its right is screen-left
+    var botNum = 9-c2;                 // bottom side: its right is screen-right
+    tlab+='<text x="'+(c2*100)+'" y="-24" font-size="34" fill="'+L+'" opacity=".7" text-anchor="middle" font-family="Kaiti TC,STKaiti,serif">'+(top===1?CN[topNum-1]:topNum)+'</text>';
+    tlab+='<text x="'+(c2*100)+'" y="'+(H+40)+'" font-size="34" fill="'+L+'" opacity=".7" text-anchor="middle" font-family="Kaiti TC,STKaiti,serif">'+(bot===1?CN[botNum-1]:botNum)+'</text>';
+  }
+  lines.innerHTML = p + tlab;
+}
+
+/* =====================================================================
+   Piece rendering
+   ===================================================================== */
+function charOf(v){ return v>0? RED[v] : BLK[-v]; }
+
+function layout(){
+  var area = $('boardArea');
+  var maxW = area.clientWidth, maxH = area.clientHeight;
+  if(maxW<20||maxH<20){ return; }
+  var ar = 950/1050;
+  var w = maxW, h = w/ar;
+  if(h>maxH){ h=maxH; w=h*ar; }
+  w *= 0.98; h *= 0.98;   /* small inset so the frame + edge labels never clip the viewport */
+  boardFrame.style.width = Math.floor(w)+'px';
+  boardFrame.style.height = Math.floor(h)+'px';
+  S.scale = w/950;
+  document.documentElement.style.setProperty('--cell', (CELL*S.scale)+'px');
+  // reposition every node
+  for(var i=0;i<S.nodes.length;i++){ var n=S.nodes[i];
+    if(!n) continue; var dp=dPos(n.s); var p=pointPx(dp.r,dp.c);
+    n.el.style.left=p.x+'px'; n.el.style.top=p.y+'px'; }
+  renderMarks();
+}
+
+function syncBoard(){
+  // rebuild piece nodes from the board
+  piecesEl.innerHTML=''; S.nodes=[]; S.sqNode=new Int32Array(90).fill(-1);
+  var b=S.pos.b;
+  for(var s=0;s<90;s++){ var v=b[s]; if(!v) continue;
+    var idx=S.nodes.length; S.nodes.push(null); S.sqNode[s]=idx;
+    var el=document.createElement('div');
+    el.className='piece '+(v>0?'red':'black');
+    el.textContent=charOf(v);
+    var dp=dPos(s), p=pointPx(dp.r,dp.c);
+    el.style.left=p.x+'px'; el.style.top=p.y+'px';
+    piecesEl.appendChild(el);
+    S.nodes[idx]={el:el,s:s};
+  }
+  // rebuild places pieces fresh: suppress the left/top transition so they don't glide from stale coords
+  var els=piecesEl.children;
+  for(var j=0;j<els.length;j++){ els[j].style.transition='none'; }
+  void piecesEl.offsetWidth;
+  for(var k=0;k<els.length;k++){ els[k].style.transition=''; }
+}
+
+function moveNode(idx,toS){ var n=S.nodes[idx]; if(!n) return;
+  n.s=toS; var dp=dPos(toS), p=pointPx(dp.r,dp.c);
+  n.el.style.left=p.x+'px'; n.el.style.top=p.y+'px';
+  n.el.classList.remove('pop'); void n.el.offsetWidth; n.el.classList.add('pop');
+}
+
+/* =====================================================================
+   Marks (last move, check, selection + legal targets, hint)
+   ===================================================================== */
+function addMark(cls,s){ var m=document.createElement('div'); m.className='mark '+cls;
+  var dp=dPos(s), p=pointPx(dp.r,dp.c); m.style.left=p.x+'px'; m.style.top=p.y+'px'; marksEl.appendChild(m); }
+var hintMove=null;
+function renderMarks(){
+  marksEl.innerHTML='';
+  // last move
+  if(S.lastMove){ addMark('last',S.lastMove.from); addMark('last',S.lastMove.to); }
+  // check (side to move in check)
+  if(S.pos && !S.gameOver){
+    var kr = S.pos.kr, kb = S.pos.kb;
+    if(S.pos.inCheck()){ var cs = (S.pos.turn===1)? kr : kb; if(cs>=0) addMark('chk',cs); }
+  }
+  // selection
+  if(S.selected>=0){
+    var t = S.pos.b[S.selected];
+    if(t){ S.nodes.forEach(function(n){ if(n && n.s===S.selected) n.el.classList.add('sel'); }); }
+    var b=S.pos.b;
+    for(var i=0;i<S.legal.length;i++){ var to=S.legal[i]>>7; addMark(b[to]?'ring':'dot',to); }
+    // highlight selected node
+    S.nodes.forEach(function(n){ if(n && n.s===S.selected) n.el.classList.add('sel'); });
+  }
+  // hint
+  if(hintMove){ addMark('ring',hintMove.from); addMark('ring',hintMove.to); }
+}
+
+/* =====================================================================
+   Notation (traditional Chinese)
+   ===================================================================== */
+function numFor(color,n){ return color===1? CN[n-1] : String(n); }
+function advance(side,fr,tr){ return (side===1)? (tr<fr?'進':'退') : (tr>fr?'進':'退'); }
+function notateMove(m, board, givesCheck, isMate){
+  var from=XQ.moveFrom(m), to=XQ.moveTo(m);
+  var v=board[from], type=v>0?v:-v, side=v>0?1:-1;
+  var fr=row(from),fc=col(from),tr=row(to),tc=col(to);
+  var ffile=fileNum(side,fc), tfile=fileNum(side,tc);
+  var pc=(side===1?RED:BLK)[type];
+  // disambiguation: other same-type, same-color on the same file
+  var group=[from];
+  for(var s=0;s<90;s++){ var q=board[s]; if(!q)continue; var qt=q>0?q:-q, qs=q>0?1:-1;
+    if(qs===side && qt===type && col(s)===fc && s!==from) group.push(s); }
+  var disamb;
+  if(group.length===1) disamb=numFor(side,ffile);
+  else{
+    var depth=function(s){ return side===1? (9-row(s)) : row(s); };  // more advanced = larger
+    var sorted=group.slice().sort(function(a,b){ return depth(b)-depth(a); }); // front first
+    var myIdx=sorted.indexOf(from);
+    disamb = sorted.length===2 ? (myIdx===0?'前':'後')
+            : (myIdx===0?'前' : (myIdx===sorted.length-1?'後':'中'));
+  }
+  var action, target;
+  if(tc!==fc){
+    if(type===XQ.R||type===XQ.C||type===XQ.K||type===XQ.A){ action='平'; target=numFor(side,tfile); }
+    else { action=advance(side,fr,tr); target=numFor(side,tfile); }   // horse / elephant
+  } else {
+    var dist=Math.abs(tr-fr); var d2=advance(side,fr,tr);
+    if(type===XQ.P){ action='進'; target=numFor(side,Math.max(1,dist)); }
+    else { action=d2; target=numFor(side,Math.max(1,dist)); }          // rook / cannon / general
+  }
+  var res=pc+disamb+action+target;
+  if(isMate) res+='將死'; else if(givesCheck) res+='將';
+  return res;
+}
+
+/* =====================================================================
+   Game setup / flow
+   ===================================================================== */
+function freshPosition(){ return new XQ.Position(XQ.initialBoard(), 1); }  // red moves first
+
+function newGame(mode,color){
+  S.mode=mode||S.mode; S.humanColor=color||S.humanColor; S.aiColor=-S.humanColor;
+  S.pos=freshPosition(); S.moves=[]; S.hist=[]; S.notaions=[];
+  S.posHist=[XQ.positionToString(S.pos.b,S.pos.turn)];
+  S.selected=-1; S.legal=[]; S.lastMove=null; S.lastDepth=null; S.gameOver=false; S.result=null; S.think=false;
+  S.redOnBottom = (S.mode==='ai') ? (S.humanColor===1) : true;   // human at the bottom
+  S.nodes=[]; S.sqNode=null;
+  drawLines(); layout(); syncBoard();   // size first so pieces are born at the final scale
+  overlayEl.hidden=true; menuEl.hidden=true;
+  refreshChrome();
+  saveGame();
+  if(S.mode==='ai'){ startWasmLoad(); if(S.pos.turn!==S.humanColor) aiTurn(); }   // AI is red and moves first
+}
+
+function legalTargets(mover){
+  if(mover<0) return [];
+  var b=S.pos.b; var v=b[mover]; if(!v) return [];
+  if((v>0?1:-1)!==S.pos.turn) return [];
+  var ms=XQ.genMoves(S.pos,true), out=[];
+  for(var i=0;i<ms.length;i++){ if(XQ.moveFrom(ms[i])===mover) out.push(XQ.moveTo(ms[i])); }
+  return out;
+}
+
+function commitMove(m, isAI){
+  var from=XQ.moveFrom(m), to=XQ.moveTo(m);
+  var captured = S.pos.b[to];            // 0 or the enemy piece
+  var mover = S.pos.b[from];
+  var moverIdx = S.sqNode? S.sqNode[from] : -1;
+  var capIdx = S.sqNode? S.sqNode[to] : -1;
+  // apply to engine
+  S.pos.makeMove(m);
+  var moverColor = -S.pos.turn;
+  // visuals (incremental glide)
+  if(S.sqNode){
+    if(moverIdx>=0){ moveNode(moverIdx,to); }
+    if(capIdx>=0){ var cn=S.nodes[capIdx]; cn.el.classList.add('captured'); }
+    S.sqNode[from]=-1; S.sqNode[to]=moverIdx;
+  }
+  var givesCheck = S.pos.inCheck();      // after the move, opponent is in check?
+  var legalNow = XQ.genMoves(S.pos,true);
+  var isMate = givesCheck && legalNow.length===0;
+  // reconstruct the PRE-move board (mover at `from`, captured piece at `to`) for notation
+  var pb = new Int8Array(90); pb.set(S.pos.b); pb[to]=captured; pb[from]=mover;
+  var nota = notateMove(m, pb, givesCheck, isMate);
+  // bookkeeping
+  S.moves.push(m); S.lastMove={from:from,to:to}; S.selected=-1; S.legal=[];
+  S.hist.push({m:m,from:from,to:to,moverIdx:moverIdx,capIdx:capIdx,capPiece:captured,moverColor:moverColor,notation:nota,givesCheck:givesCheck});
+  S.notaions.push(nota);
+  S.posHist.push(XQ.positionToString(S.pos.b,S.pos.turn));
+  // sounds
+  sfx[isMate?'win':(givesCheck?'check':(captured?'capture':'move'))]();
+  if(isMate && moverColor===S.humanColor) sfx.win(); else if(isMate) sfx.lose();
+  refreshChrome();
+  afterMove();
+}
+
+function pliesNoCapture(){
+  var n=0;
+  for(var i=S.hist.length-1;i>=0;i--){ if(S.hist[i].capPiece) break; n++; }
+  return n;
+}
+function threefold(){
+  var cur=S.posHist[S.posHist.length-1], c=0;
+  for(var i=0;i<S.posHist.length;i++) if(S.posHist[i]===cur) c++;
+  return c>=3;
+}
+
+function afterMove(){
+  renderMarks();
+  var legal=XQ.genMoves(S.pos,true), inChk=S.pos.inCheck();
+  // 1) decisive: no legal move => loss (checkmate or stalemate, both loss in xiangqi)
+  if(legal.length===0){
+    var winner=-S.pos.turn;
+    endGame(winner, inChk? '將死（Checkmate）' : '困斃（無子可動）');
+    return;
+  }
+  // 2) draws
+  if(XQ.isInsufficientMaterial(S.pos)){ endGame(0,'和棋（子力不足以將死）'); return; }
+  if(threefold()){ endGame(0,'和棋（三次重複局面）'); return; }
+  if(pliesNoCapture()>=NOCAP_LIMIT){ endGame(0,'和棋（60 回合無吃子）'); return; }
+  // 3) AI?
+  saveGame();
+  if(S.mode==='ai' && S.pos.turn!==S.humanColor && !S.gameOver) aiTurn();
+}
+
+function endGame(winner, reason){
+  S.gameOver=true; S.result={winner:winner,reason:reason};
+  S.selected=-1; S.legal=[];
+  refreshChrome(); renderMarks();
+  clearSavedGame();
+  var r=$('ovResult'), rs=$('ovReason');
+  if(winner===0){ r.textContent='和棋'; r.className='draw'; sfx.draw(); }
+  else if(winner===1){ r.textContent='紅方勝'; r.className='red'; (winner===S.humanColor? sfx.win():sfx.lose()); }
+  else { r.textContent='黑方勝'; r.className='black'; (winner===S.humanColor? sfx.win():sfx.lose()); }
+  rs.textContent=reason;
+  setTimeout(function(){ overlayEl.hidden=false; }, 480);
+}
+
+/* =====================================================================
+   AI (Web Worker w/ main-thread fallback)
+   ===================================================================== */
+var workerPromise=null, reqId=0;
+function getWorker(){
+  if(workerPromise) return workerPromise;
+  workerPromise=new Promise(function(resolve,reject){
+    var boot="XQ.setTTMax((self.navigator&&navigator.hardwareConcurrency||2)>=4?1500000:500000);self.onmessage=function(e){var d=e.data;var pp=XQ.parsePosition(d.str);var pos=new XQ.Position(pp.board,pp.turn);var r=XQ.rootSearch(pos,d.opt);self.postMessage({move:r.move,score:r.score,depth:r.depth,nodes:r.nodes,nps:r.nps,timeMs:r.timeMs,allScores:r.allScores,allMoves:r.allMoves});};";
+    /* engine.js is already a loaded classic script: it published its own
+       source to window.__XQ_ENGINE_SOURCE (see top of engine.js). Using that
+       means NO fetch — so the worker also works from file:// pages. The
+       fetch remains only as a fallback for exotic load setups. */
+    var src=(typeof window!=='undefined'&&window.__XQ_ENGINE_SOURCE)||null;
+    var getSrc=src?Promise.resolve(src):fetch('engine.js').then(function(r){return r.text();});
+    getSrc.then(function(srcText){
+      try{ var b=new Blob([srcText+'\n;'+boot],{type:'text/javascript'}); resolve(new Worker(URL.createObjectURL(b))); }
+      catch(err){ reject(err); }
+    }).catch(reject);
+  });
+  return workerPromise;
+}
+
+/* =====================================================================
+   Pikafish WASM engine (tournament strength; JS engine above is the
+   fallback if the WASM module / 50MB net can't be loaded).
+
+   Two ways the four engine assets can arrive, both ending in the same
+   worker boot:
+     1. WEB   (http/https, e.g. GitHub Pages): fetch the files, the 50MB
+        net with download progress. This is the smaller, faster path.
+     2. EMBED (assets-embedded.js via a <script> tag — generated by
+        build-assets.py): base64 of every asset in one JS file. Script
+        tags work from file:// (double-click on a Mac, Files app on an
+        iPhone), where fetches are blocked — this is the NO-SERVER path.
+   Web mode falls back to EMBED automatically when the fetches fail
+   (corrupt/partial 50MB file, Git-LFS pointer served instead, offline…).
+   ===================================================================== */
+var WASM={ state:'unloaded', worker:null, reqId:0, busy:false, netPct:-1, srcKind:'', usedEmbedded:false };
+var IS_WEB=(location.protocol==='http:'||location.protocol==='https:');
+
+/* ---- EMBED path: load assets-embedded.js with a script tag ---- */
+var EMBED={ promise:null, fail:'' };
+function loadEmbedded(){
+  if(EMBED.promise) return EMBED.promise;
+  EMBED.promise=new Promise(function(resolve){
+    var s=document.createElement('script');
+    s.src='assets-embedded.js';
+    s.onload=function(){ resolve(!!(window.__XQ_EMBED && window.__XQ_EMBED.files)); };
+    s.onerror=function(){ EMBED.fail='assets-embedded.js 搵唔到（run: python3 build-assets.py）'; resolve(false); };
+    document.documentElement.appendChild(s);
+  });
+  return EMBED.promise;
+}
+/* base64 -> Uint8Array, in ~1MB slices (the net is a 67MB string) */
+function b64ToU8(b64){
+  var n=b64.length;
+  var pad=(b64.charCodeAt(n-1)===61)?((b64.charCodeAt(n-2)===61)?2:1):0;
+  var total=(n*3>>2)-pad;
+  var out=new Uint8Array(total), i=0, a=0, STEP=0x100000, bin, j;
+  while(a<n){
+    var s=b64.slice(a,Math.min(n,a+STEP)); a+=s.length;
+    bin=atob(s);
+    for(j=0;j<bin.length && i<total;j++) out[i++]=bin.charCodeAt(j);
+  }
+  if(i!==total) throw new Error('base64 decode length mismatch');
+  return out;
+}
+function embeddedAssets(){
+  var f=window.__XQ_EMBED.files;
+  WASM.netPct=-2; if(S.mode==='ai') refreshChrome();   // “解碼中”
+  return {
+    srcText:new TextDecoder('utf-8').decode(b64ToU8(f['engine-wasm.js'])),
+    js:b64ToU8(f['wasm/pikafish-single.js']),
+    wasm:b64ToU8(f['wasm/pikafish-single.wasm']),
+    net:b64ToU8(f['wasm/pikafish.nnue'])
+  };
+}
+
+/* ---- shared worker boot (both paths) ---- */
+function bootWasmWorker(parts, kind){
+  WASM.srcKind=kind; if(kind==='embed') WASM.usedEmbedded=true;
+  var b=new Blob([parts.srcText],{type:'text/javascript'});
+  WASM.worker=new Worker(URL.createObjectURL(b));
+  WASM.worker.onmessage=function(e){
+    var d=e.data||{};
+    if(d.type==='status'){
+      if(d.phase==='ready'){ WASM.state='ready'; WASM.netPct=100; if(S.mode==='ai') refreshChrome(); }
+      else if(d.phase==='failed'){
+        WASM.failMsg=d.msg||'';
+        /* Engine init failed (corrupt/partial net on the web path — e.g. a
+           Git-LFS pointer file served instead of the binary): try the
+           embedded copy once, it was verified when build-assets.py ran. */
+        if(WASM.srcKind!=='embed'){
+          console.warn('WASM init failed ('+WASM.failMsg+'), retrying with embedded assets');
+          loadEmbedded().then(function(ok){
+            if(ok){ try{ WASM.worker.terminate(); }catch(e){} bootWasmWorker(embeddedAssets(),'embed'); return; }
+          });
+        }
+        WASM.state='failed'; WASM.worker=null; if(S.mode==='ai') refreshChrome();
+      }
+    }
+  };
+  WASM.worker.onerror=function(e){ console.warn('wasm worker error', e.message||e); };
+  WASM.worker.postMessage({type:'init', js:parts.js.buffer, wasm:parts.wasm.buffer, net:parts.net.buffer, hashMB:32});
+}
+
+/* ---- WEB path: fetch the assets (small files, then the 50MB net) ---- */
+function fetchWebAssets(dir){
+  return Promise.resolve()
+    .then(function(){ return fetch(dir+'engine-wasm.js').then(function(r){ if(!r.ok) throw new Error('engine-wasm.js'); return r.text(); }); })
+    .then(function(src){
+      var jsP=fetch(dir+'wasm/pikafish-single.js').then(function(r){ if(!r.ok) throw new Error('module js'); return r.arrayBuffer(); });
+      var wasmP=fetch(dir+'wasm/pikafish-single.wasm').then(function(r){ if(!r.ok) throw new Error('module wasm'); return r.arrayBuffer(); });
+      return Promise.all([src, jsP, wasmP]);
+    })
+    .then(function(parts){
+      var js=new Uint8Array(parts[1]);
+      var wasm=new Uint8Array(parts[2]);
+      var sleep=function(ms){ return new Promise(function(r){ setTimeout(r,ms); }); };
+      function fetchNet(tries){
+        return fetch(dir+'wasm/pikafish.nnue').then(function(r){
+          if(!r.ok) throw new Error('net '+r.status);
+          var total=parseInt(r.headers.get('Content-Length')||'0',10);
+          if(!r.body || !total) return r.arrayBuffer();
+          var reader=r.body.getReader(), chunks=[], got=0, lastPct=-1;
+          function pump(){
+            return reader.read().then(function(res){
+              if(res.done){ var buf=new Uint8Array(got); var off=0;
+                for(var i=0;i<chunks.length;i++){ buf.set(chunks[i],off); off+=chunks[i].length; }
+                return buf.buffer; }
+              got+=res.value.length; chunks.push(res.value);
+              var pct=Math.min(99,(got*100/total)|0);
+              if(pct>=lastPct+10){ WASM.netPct=pct; refreshChrome(); }
+              return pump();
+            });
+          }
+          return pump();
+        }).catch(function(e){
+          if(tries<3){ WASM.netPct=-1; refreshChrome(); return sleep(1500).then(function(){ return fetchNet(tries+1); }); }
+          throw e;
+        });
+      }
+      return fetchNet(1).then(function(net){ return {srcText:parts[0], js:js, wasm:wasm, net:new Uint8Array(net)}; });
+    });
+}
+
+function startWasmLoad(){
+  if(WASM.state!=='unloaded') return;
+  if(!('WebAssembly' in window)){ WASM.state='failed'; WASM.failMsg='此環境唔支援 WebAssembly'; return; }
+  WASM.state='loading'; refreshChrome();
+  var base=location.href.split('#')[0].split('?')[0];
+  var dir=base.slice(0, base.lastIndexOf('/')+1);
+
+  var acquire= IS_WEB
+    ? fetchWebAssets(dir).catch(function(err){
+        /* web fetch failed (missing file, 50MB pointer, offline…) → embedded */
+        console.warn('WASM web assets failed, falling back to embedded:', err && err.message || err);
+        return loadEmbedded().then(function(ok){ if(!ok) throw err; return embeddedAssets(); });
+      })
+    : loadEmbedded().then(function(ok){
+        if(!ok) throw new Error(EMBED.fail || 'assets-embedded.js missing');
+        return embeddedAssets();
+      });
+
+  acquire
+    .then(function(parts){ bootWasmWorker(parts, IS_WEB?'web':'embed'); })
+    .catch(function(err){ console.warn('WASM load failed:', err && err.message || err); WASM.state='failed'; WASM.failMsg=(err&&err.message)||''; if(S.mode==='ai') refreshChrome(); });
+}
+
+function mapWasmDone(d,str){
+  var mv = d.move ? XQ.uciToMove(d.move) : -1;
+  var side = str[91]==='b' ? -1 : 1;
+  var score=0;
+  if(d.mate!=null){ var base=100000-Math.min(90,Math.abs(d.mate))*10; score=(d.mate>0?base:-base); if(side===-1) score=-score; }
+  else if(d.cp!=null){ score=(side===-1)? -d.cp : d.cp; }
+  var allMoves=null;
+  try{ var pp=XQ.parsePosition(str); allMoves=XQ.genMoves(new XQ.Position(pp.board,pp.turn),true); }catch(e){}
+  return { move:mv, score:score, depth:d.depth, nodes:d.nodes, nps:d.nps, timeMs:d.timeMs, allMoves:allMoves, allScores:null, engine:'pikafish' };
+}
+function wasmSearch(str,opt,cb){
+  var w=WASM.worker; if(!w || WASM.busy){ jsSearch(str,opt,cb); return; }
+  WASM.busy=true;
+  var id=++WASM.reqId;
+  var hist=[];
+  try{ hist=S.moves.map(function(m){ return XQ.moveToUci(m); }); }catch(e){}
+  var settled=false;
+  var finish=function(d){
+    if(settled) return; settled=true; WASM.busy=false;
+    try{ w.removeEventListener('message',om); }catch(e){}
+    /* engine couldn't set the position (history drift) -> JS engine is the
+       source of truth, so fall back instead of reporting a (wrong) result */
+    if(d && d.err && d.err!=='noMoves'){ jsSearch(str,opt,cb); return; }
+    cb(mapWasmDone(d||{noMoves:true},str));
+  };
+  var om=function(e){
+    var d=e.data||{};
+    if(d.type!=='done' || d.reqId!==id) return;
+    finish(d);
+  };
+  w.addEventListener('message',om);
+  /* engine overshoots the budget on a slow phone? fall back to the JS engine;
+     a late WASM result is ignored (settled flag / S.think guard in aiTurn) */
+  setTimeout(function(){ if(!settled){ WASM.busy=false; jsSearch(str,opt,cb); } }, opt.timeMs+15000);
+  try{ w.postMessage({type:'search', reqId:id, str:str, hist:hist, opt:opt}); }
+  catch(e){ settled=true; WASM.busy=false; jsSearch(str,opt,cb); }
+}
+
+function searchAsync(str,opt,cb){
+  if(WASM.state==='ready') { wasmSearch(str,opt,cb); return; }
+  jsSearch(str,opt,cb);
+}
+function jsSearch(str,opt,cb){
+  getWorker().then(function(w){
+    var id=++reqId, done=false;
+    var om=function(e){ if(id!==reqId){ return; } w.removeEventListener('message',om); w.removeEventListener('error',oe); done=true; cb(e.data); };
+    var oe=function(){ if(!done){ w.removeEventListener('message',om); done=true; fallbackSearch(str,opt,cb); } };
+    w.addEventListener('message',om); w.addEventListener('error',oe);
+    setTimeout(function(){ if(!done){ w.removeEventListener('message',om); w.removeEventListener('error',oe); done=true; fallbackSearch(str,opt,cb); } }, opt.timeMs+9000);
+    try{ w.postMessage({str:str,opt:opt}); }catch(e){ fallbackSearch(str,opt,cb); }
+  }).catch(function(){ fallbackSearch(str,opt,cb); });
+}
+function fallbackSearch(str,opt,cb){
+  XQ.setTTMax((navigator.hardwareConcurrency||2)>=4?1500000:500000);
+  var pp=XQ.parsePosition(str); var pos=new XQ.Position(pp.board,pp.turn);
+  setTimeout(function(){ try{ cb(XQ.rootSearch(pos,opt)); }catch(e){ console.warn(e); cb({move:-1}); } },30);
+}
+
+function aiTurn(){
+  if(S.gameOver) return;
+  S.think=true; refreshStatus();
+  var opt=DIFF[S.diff];
+  /* opening book: deterministic theory, played instantly (prob per level) */
+  var bk=bookMove();
+  if(bk>=0){ S.lastDepth=null; commitMove(bk,true); S.think=false; return; }
+  var str=XQ.positionToString(S.pos.b,S.pos.turn);
+  searchAsync(str,{timeMs:opt.timeMs,maxDepth:opt.maxDepth},function(res){
+    if(!S.think) return;              // a duplicate result (WASM+JS race) — ignore
+    if(S.gameOver){ S.think=false; refreshStatus(); return; }
+    S.lastDepth=res.depth!=null?res.depth:null;
+    var mv=chooseAIMove(res);
+    S.think=false;
+    if(mv<0){ afterMove(); return; }   // no legal move (should be caught earlier)
+    // defensive legality check
+    var ok=false; var lm=XQ.genMoves(S.pos,true);
+    for(var i=0;i<lm.length;i++) if(lm[i]===mv){ ok=true; break; }
+    if(!ok) mv=(lm.length? lm[0] : -1);
+    if(mv<0) return;
+    commitMove(mv,true);
+  });
+}
+/* =====================================================================
+   Opening book — standard mainlines (engine coordinates; red home = row 9).
+   Prefix-matched against the moves actually played; a book move is only
+   returned if it is legal on the board, so a stale entry can never crash
+   the game (it simply falls back to search). Weights ~ popularity.
+   ===================================================================== */
+function bm(fr,fc,tr,tc){ return (fr*9+fc) | ((tr*9+tc)<<7); }   /* engine move code */
+var BOOK=[
+  /* 中炮正線: 1.炮二平五 馬8進7 2.傌二進三 車9平8 3.俥一平二 卒7進1 */
+  {w:5, ms:[bm(7,7,7,4), bm(0,7,2,6), bm(9,7,7,6), bm(0,8,0,7), bm(9,8,9,7), bm(3,6,4,6)]},
+  /* 中炮(砲八)正線: 1.炮八平五 馬8進7 2.傌八進七 車9平8 3.俥九平8 卒7進1 */
+  {w:5, ms:[bm(7,1,7,4), bm(0,7,2,6), bm(9,1,7,2), bm(0,8,0,7), bm(9,0,9,1), bm(3,6,4,6)]},
+  /* 中炮對順炮: 1.炮二平五 砲8平5 2.傌二進三 馬8進7 */
+  {w:2, ms:[bm(7,7,7,4), bm(2,7,2,4), bm(9,7,7,6), bm(0,7,2,6)]},
+  /* 中炮對飛象: 1.炮二平五 象3進5 2.傌八進七 馬8進7 */
+  {w:2, ms:[bm(7,7,7,4), bm(0,2,2,4), bm(9,1,7,2), bm(0,7,2,6)]},
+  /* 飛相局: 1.相三進五 馬8進7 2.傌二進三 砲2平5 (8炮路被己馬擋) */
+  {w:2, ms:[bm(9,6,7,4), bm(0,7,2,6), bm(9,7,7,6), bm(2,1,2,4)]},
+  /* 緩出兵: 1.兵三進一 馬8進7 */
+  {w:1, ms:[bm(6,6,5,6), bm(0,7,2,6)]}
+];
+function bookMove(){
+  if(S.mode!=='ai'||S.gameOver) return -1;
+  var d=DIFF[S.diff]; if(!d||!d.book) return -1;
+  if(S.moves.length>10) return -1;                 /* book horizon */
+  if(Math.random()>d.book) return -1;              /* level-based adherence */
+  var color=S.aiColor, need=S.moves.length;
+  var cands=[];
+  for(var i=0;i<BOOK.length;i++){
+    var L=BOOK[i], upto=Math.min(S.moves.length,L.ms.length), ok=true;
+    for(var k=0;k<upto;k++){ if(S.moves[k]!==L.ms[k]){ ok=false; break; } }
+    if(ok && L.ms.length>upto) cands.push(L);
+  }
+  /* the next book move must belong to the AI */
+  cands=cands.filter(function(L){ return ((need%2===0)?1:-1)===color; });
+  if(!cands.length) return -1;
+  var tot=0, j;
+  for(j=0;j<cands.length;j++) tot+=cands[j].w;
+  var r=Math.random()*tot, acc=0, pick=cands[0];
+  for(j=0;j<cands.length;j++){ acc+=cands[j].w; if(r<=acc){ pick=cands[j]; break; } }
+  var mv=pick.ms[need];
+  var leg=XQ.genMoves(S.pos,true);
+  for(var n=0;n<leg.length;n++) if(leg[n]===mv) return mv;
+  return -1;
+}
+function chooseAIMove(res){
+  if(res.move<0) return res.move;
+  var d=DIFF[S.diff];
+  if(d.blunder>0 && Math.random()<d.blunder && res.allMoves && res.allMoves.length){
+    return res.allMoves[(Math.random()*res.allMoves.length)|0];
+  }
+  return res.move;
+}
+
+/* =====================================================================
+   Chrome (status, eval, trays, move list)
+   ===================================================================== */
+function refreshStatus(){
+  if(S.gameOver){
+    statusEl.innerHTML = (S.result.winner===0? '和棋' : (S.result.winner===1?'紅方':'黑方')+' 獲勝');
+    return;
+  }
+  var turn=S.pos.turn;
+  var inChk=S.pos.inCheck();
+  var who = turn===1? '紅方' : '黑方';
+  var dotCls = turn===1? 'turn-red':'turn-black';
+  var extra = inChk? ' <b style="color:var(--check)">被將</b>' : '';
+  var ai = (S.mode==='ai' && turn===S.aiColor);
+  var aiInfo=(S.lastDepth!=null?' <span style="opacity:.6">depth '+S.lastDepth+'</span>':'');
+  var eng='';
+  if(S.mode==='ai'){
+    if(WASM.state==='ready') eng=' <span style="opacity:.55;font-size:.85em">⚡Pikafish'+(WASM.usedEmbedded?'(內置)':'')+'</span>';
+    else if(WASM.state==='loading') eng=' <span style="opacity:.55;font-size:.85em">⚡'+(WASM.netPct>=0?'下載中 '+WASM.netPct+'%':(WASM.netPct===-2?'解碼中':'準備中'))+'</span>';
+    else if(WASM.state==='failed') eng=' <span style="opacity:.45;font-size:.85em" title="'+(WASM.failMsg||'')+'">JS引擎</span>';
+  }
+  statusEl.innerHTML = '<span class="turn-dot '+dotCls+'"></span>'+(S.think?'<span class="thinking">AI 思考中</span>':'輪到'+who)+extra+aiInfo+eng;
+}
+
+function refreshEval(){
+  if(!S.pos) return;
+  var cp=XQ.evalAbs(S.pos);            // + = red
+  var redFrac=1/(1+Math.exp(-cp/350));
+  evalFill.style.width=(redFrac*100).toFixed(1)+'%';
+  var pawns=cp/100;
+  evalNum.textContent=(pawns>0?'+':'')+pawns.toFixed(1);
+  evalNum.className = pawns>0.02? 'red' : (pawns<-0.02? 'black' : '');
+}
+
+function capturedList(){
+  var rc=[], bc=[];
+  for(var i=0;i<S.hist.length;i++){ var h=S.hist[i]; if(!h.capPiece) continue;
+    if(h.moverColor===1) rc.push(h.capPiece); else bc.push(h.capPiece); }  // red took black pieces etc.
+  // rc = pieces red captured (black pieces); bc = pieces black captured (red pieces)
+  return {r:rc, b:bc};
+}
+function renderTrays(){
+  var c=capturedList();
+  capsRed.innerHTML=''; capsBlack.innerHTML='';
+  var sumR=0,sumB=0;
+  c.r.forEach(function(v){ var d=document.createElement('span'); d.className='cap black'; d.textContent=charOf(v); capsRed.appendChild(d); sumR+=XQ.VAL[-v]; });
+  c.b.forEach(function(v){ var d=document.createElement('span'); d.className='cap red'; d.textContent=charOf(v); capsBlack.appendChild(d); sumB+=XQ.VAL[v]; });
+  var adv=(sumR-sumB)/100;
+  var tr=document.createElement('span'); tr.className='adv '+(adv>0?'up':adv<0?'down':'');
+  tr.textContent = adv>0?(' 紅 +'+adv.toFixed(1)) : adv<0?(' 黑 +'+(-adv).toFixed(1)) : '';
+  (adv>=0? capsRed: capsBlack).appendChild(tr);
+}
+
+function renderMoveList(){
+  var h='';
+  if(S.hist.length===0){ h='<div class="empty">尚無着法</div>'; }
+  else{
+    for(var i=0;i<S.hist.length;i+=2){
+      var a=S.hist[i], b=S.hist[i+1];
+      h+='<div class="mrow"><span class="mnum">'+(i/2+1)+'</span>'
+        +'<span class="mc'+(a.givesCheck?' chk':'')+'">'+a.notation+'</span>'
+        +'<span class="mc'+(b&&b.givesCheck?' chk':'')+'">'+(b?b.notation:'')+'</span></div>';
+    }
+  }
+  moveListEl.innerHTML=h;
+  moveListEl.scrollTop=moveListEl.scrollHeight;
+}
+
+function refreshChrome(){
+  refreshStatus(); refreshEval(); renderTrays(); renderMoveList();
+  document.querySelector('#btnUndo').disabled = S.hist.length===0 || S.think;
+  document.querySelector('#btnHint').disabled = S.gameOver || S.think || (S.mode==='ai' && S.pos.turn!==S.humanColor);
+}
+
+/* =====================================================================
+   Input (pointer: tap-to-move + drag)
+   ===================================================================== */
+var pStart=null, pMoved=false, dragNodeIdx=-1;
+function evSquare(e){
+  var rc=boardFrame.getBoundingClientRect();
+  return boardSquareFromPoint(e.clientX-rc.left, e.clientY-rc.top);
+}
+function clearSel(){ S.selected=-1; S.legal=[]; S.nodes.forEach(function(n){ if(n) n.el.classList.remove('sel','lift'); }); }
+/* reposition a node's DOM element back onto its logical (engine) square — used
+   when a drag is aborted so a piece never "floats" off the grid */
+function snapNode(n){ if(!n) return; var dp=dPos(n.s); var p=pointPx(dp.r,dp.c); n.el.style.left=p.x+'px'; n.el.style.top=p.y+'px'; }
+
+function onDown(e){
+  audio(); // unlock on first gesture
+  if(S.gameOver || S.think) return;
+  if(S.mode==='ai' && S.pos.turn!==S.humanColor) return;
+  var s=evSquare(e);
+  if(s<0){ clearSel(); renderMarks(); return; }
+  var v=S.pos.b[s];
+  var isTarget = s!==S.selected && S.legal.indexOf(s)>=0;
+  if(isTarget){ // tap-to-move (also drag start onto a target)
+    pStart={s:s,movedTarget:true}; pMoved=false; dragNodeIdx=-1;
+    boardFrame.setPointerCapture && boardFrame.setPointerCapture(e.pointerId);
+    return;
+  }
+  if(v && (v>0?1:-1)===S.pos.turn){
+    clearSel();                                     /* clear any previous highlight/state FIRST */
+    S.selected=s; S.legal=legalTargets(s);          /* then record the new selection + its legal targets */
+    var n=S.nodes[S.sqNode[s]]; if(n) n.el.classList.add('sel');
+    renderMarks();
+    pStart={s:s,movedTarget:false}; pMoved=false; dragNodeIdx=S.sqNode[s];
+    boardFrame.setPointerCapture && boardFrame.setPointerCapture(e.pointerId);
+  } else {
+    clearSel(); renderMarks();
+  }
+}
+function onMove(e){
+  if(!pStart) return;
+  pMoved=true;
+  if(dragNodeIdx>=0){ var n=S.nodes[dragNodeIdx]; if(n){ n.el.classList.add('lift'); var rc=boardFrame.getBoundingClientRect();
+      var x=e.clientX-rc.left, y=e.clientY-rc.top; n.el.style.left=x+'px'; n.el.style.top=y+'px'; } }
+}
+function onUp(e){
+  if(!pStart) return;
+  var s=evSquare(e);
+  var started=pStart; pStart=null;
+  var dragIdx=dragNodeIdx; dragNodeIdx=-1;
+  var dragNode = dragIdx>=0 ? S.nodes[dragIdx] : null;
+  if(dragNode) dragNode.el.classList.remove('lift');
+  var committed=false;
+  if(started.movedTarget){
+    if(s>=0 && s===started.s){ commitMove(moveOf(started.s)); committed=true; }        // tap on target
+    else if(s>=0 && S.legal.indexOf(s)>=0){ commitMove(moveOf(s)); committed=true; }    // drop on a valid square
+  } else if(pMoved && s>=0 && S.legal.indexOf(s)>=0 && s!==S.selected){
+    commitMove(moveOf(s)); committed=true;   // drag onto a valid square
+  }
+  /* aborted (dropped off-grid, or on an illegal square): snap the piece back onto its
+     logical square so the rendered board never desyncs from the engine */
+  if(!committed && dragNode) snapNode(dragNode);
+  renderMarks();
+}
+function moveOf(targetS){ var f=S.selected, t=targetS; return f | (t<<7); }
+
+/* =====================================================================
+   Hint
+   ===================================================================== */
+function hint(){
+  if(S.gameOver||S.think) return;
+  if(S.mode==='ai' && S.pos.turn!==S.humanColor) return;
+  audio();
+  hintMove=null; renderMarks();
+  var str=XQ.positionToString(S.pos.b,S.pos.turn);
+  searchAsync(str,{timeMs:900,maxDepth:10},function(res){
+    if(res.move<0) return;
+    hintMove={from:XQ.moveFrom(res.move),to:XQ.moveTo(res.move)};
+    renderMarks();
+    setTimeout(function(){ if(hintMove){ hintMove=null; renderMarks(); } },1600);
+  });
+}
+
+/* =====================================================================
+   Undo / restart / flip
+   ===================================================================== */
+function undo(){
+  if(S.think||S.gameOver) return;
+  if(S.mode==='ai'){
+    // undo until it's the human's turn (up to 2 plies)
+    var n=0;
+    while(S.hist.length && (S.pos.turn===S.humanColor) && n<2){ popOne(); n++; }
+    if(!n && S.hist.length){ popOne(); }   // at least one
+    if(!S.hist.length) return;
+    // ensure it's the human's turn; if AI would move, do it
+    rebuildAll();
+  } else { popOne(); rebuildAll(); }
+  S.gameOver=false; S.result=null; overlayEl.hidden=true;
+  saveGame();
+  if(S.mode==='ai' && S.pos.turn!==S.humanColor) aiTurn();
+}
+function popOne(){
+  var h=S.hist.pop(); if(!h) return; S.moves.pop(); S.posHist.pop(); S.notaions.pop();
+  S.pos.unmakeMove(h.m);
+}
+function rebuildAll(){
+  S.selected=-1; S.legal=[]; clearSel();
+  if(S.lastMove) {} else S.lastMove=null;
+  if(S.hist.length){ var last=S.hist[S.hist.length-1]; S.lastMove={from:last.from,to:last.to}; } else S.lastMove=null;
+  syncBoard(); refreshChrome(); renderMarks();
+}
+
+function flip(){ S.redOnBottom=!S.redOnBottom; drawLines(); syncBoard(); S.selected=-1;S.legal=[]; renderMarks(); }
+
+/* =====================================================================
+   Autosave
+   ===================================================================== */
+var KEY='xiangqi_v2_game';
+function saveGame(){
+  try{
+    localStorage.setItem(KEY, JSON.stringify({
+      str:XQ.positionToString(S.pos.b,S.pos.turn),
+      hist:S.hist.map(function(h){return {m:h.m,notation:h.notation,givesCheck:!!h.givesCheck,capPiece:h.capPiece,moverColor:h.moverColor};}),
+      mode:S.mode,diff:S.diff,humanColor:S.humanColor,redOnBottom:S.redOnBottom
+    }));
+  }catch(e){}
+}
+function loadGame(){ try{ var s=localStorage.getItem(KEY); return s? JSON.parse(s):null; }catch(e){ return null; } }
+function clearSavedGame(){ try{ localStorage.removeItem(KEY); }catch(e){} }
+function resumeGame(){
+  var d=loadGame(); if(!d) return false;
+  var pp=XQ.parsePosition(d.str);
+  S.pos=new XQ.Position(pp.board,pp.turn);
+  S.hist=(d.hist||[]).map(function(h){ return {m:h.m,from:XQ.moveFrom(h.m),to:XQ.moveTo(h.m),notation:h.notation||'',givesCheck:!!h.givesCheck,capPiece:h.capPiece||0,moverColor:h.moverColor||1,moverIdx:-1,capIdx:-1}; });
+  S.notaions=S.hist.map(function(h){return h.notation;});
+  S.moves=S.hist.map(function(h){return h.m;});
+  S.posHist=[XQ.positionToString(XQ.initialBoard(),1)];
+  var tmp=new XQ.Position(XQ.initialBoard(),1);
+  for(var i=0;i<S.hist.length;i++){ tmp.makeMove(S.hist[i].m); S.posHist.push(XQ.positionToString(tmp.b,tmp.turn)); }
+  S.mode=d.mode||'ai'; S.diff=d.diff!=null?d.diff:2; S.humanColor=d.humanColor||1; S.aiColor=-S.humanColor;
+  S.redOnBottom = d.redOnBottom!=null? d.redOnBottom : (S.mode==='ai'? S.humanColor===1 : true);
+  S.gameOver=false; S.result=null; S.selected=-1; S.legal=[]; S.think=false; S.lastMove=null;
+  S.nodes=[]; S.sqNode=null;
+  drawLines(); syncBoard();
+  if(S.hist.length){ S.lastMove={from:S.hist[S.hist.length-1].from,to:S.hist[S.hist.length-1].to}; }
+  overlayEl.hidden=true; menuEl.hidden=true;
+  refreshChrome(); renderMarks();
+  if(S.mode==='ai'){ startWasmLoad(); if(S.pos.turn!==S.humanColor) aiTurn(); }
+  return true;
+}
+function hasSavedGame(){ return !!loadGame(); }
+
+/* =====================================================================
+   Wire up UI
+   ===================================================================== */
+function buildSeg(el,items,activeKey,valKey,cb){
+  el.innerHTML='';
+  items.forEach(function(it){
+    var b=document.createElement('button'); b.textContent=it;
+    if(it===activeKey) b.className='on';
+    b.onclick=function(){ el.querySelectorAll('button').forEach(function(x){x.className='';}); b.className='on'; cb(it); };
+    el.appendChild(b);
+  });
+}
+function initMenu(){
+  buildSeg($('mDiff'),DIFF.map(function(d){return d.name;}),DIFF[S.diff].name,function(v){ S.diff=DIFF.findIndex(function(d){return d.name===v;}); });
+  // mode
+  var mm=$('mMode');
+  mm.querySelectorAll('button').forEach(function(b){ b.onclick=function(){ mm.querySelectorAll('button').forEach(function(x){x.className='';}); b.className='on'; S.mode=b.dataset.mode;
+      $('colorLabel').textContent = S.mode==='ai'? '選擇棋子' : '（雙人格）';
+      $('mColor').style.visibility = S.mode==='ai'? 'visible':'hidden'; }; });
+  // color
+  var mc=$('mColor');
+  mc.querySelectorAll('button').forEach(function(b){ b.onclick=function(){ mc.querySelectorAll('button').forEach(function(x){x.className='';}); b.className='on'; S.humanColor=parseInt(b.dataset.color,10); S.aiColor=-S.humanColor; }; });
+  $('mStart').onclick=function(){ newGame(S.mode,S.humanColor); };
+  $('mContinue').onclick=function(){ if(resumeGame()){ menuEl.hidden=true; } };
+  $('mContinue').hidden=!hasSavedGame();
+}
+
+function initControls(){
+  buildSeg($('diffSel'),DIFF.map(function(d){return d.name;}),DIFF[S.diff].name,function(v){ S.diff=DIFF.findIndex(function(d){return d.name===v;}); });
+  $('btnUndo').onclick=undo;
+  $('btnHint').onclick=hint;
+  $('btnFlip').onclick=flip;
+  $('btnRestart').onclick=function(){ newGame(S.mode,S.humanColor); };
+  $('btnSound').onclick=function(){ S.sound=!S.sound; $('btnSound').textContent=S.sound?'🔊':'🔇'; if(S.sound) audio(); };
+  $('btnMenu').onclick=function(){ menuEl.hidden=false; };
+  $('ovAgain').onclick=function(){ newGame(S.mode,S.humanColor); };
+  $('ovMenu').onclick=function(){ menuEl.hidden=false; };
+  // board pointer
+  boardFrame.addEventListener('pointerdown',onDown);
+  boardFrame.addEventListener('pointermove',onMove);
+  boardFrame.addEventListener('pointerup',onUp);
+  boardFrame.addEventListener('pointercancel',function(){ if(pStart){ var d=dragNodeIdx; pStart=null; if(d>=0){var n=S.nodes[d]; if(n){ n.el.classList.remove('lift'); snapNode(n); } dragNodeIdx=-1; } renderMarks(); } });
+}
+
+function resizeAll(){ layout(); }
+
+/* =====================================================================
+   #autotest — end-to-end self test (dev/CI hook)
+   Open the game with #autotest (or ?autotest): it plays an engine-vs-
+   engine opening, waits for the Pikafish WASM engine to be ready, then
+   shows a PASS/FAIL banner (and sets document.title + window.__AUTOTEST_RESULT).
+   Inert for normal players (the deep link is never shown by the PWA).
+   ===================================================================== */
+function runAutotest(){
+  var t0=Date.now(), plies=0, maxPlies=10, first=null, finished=false;
+  window.__XQ_ERRORS=[];
+  window.addEventListener('error',function(e){ window.__XQ_ERRORS.push(String(e.message)); });
+  function banner(ok,text){
+    var d=document.createElement('div');
+    d.id='__autotest';
+    d.style.cssText='position:fixed;top:0;left:0;right:0;z-index:99;padding:8px 12px;font:12px/1.5 monospace;color:#fff;white-space:pre-wrap;background:'+(ok?'#1d4d2b':'#5a1d18')+';';
+    d.textContent=text;
+    document.body.appendChild(d);
+    document.title='AUTOTEST '+(ok?'PASS':'FAIL');
+    window.__AUTOTEST_RESULT={pass:ok,text:text};
+    console.log(text);
+  }
+  function finish(ok,note){
+    if(finished) return; finished=true;
+    var engOk=(WASM.state==='ready');
+    var all=ok && engOk && plies>0 && window.__XQ_ERRORS.length===0;
+    var src=WASM.state==='ready' ? (WASM.usedEmbedded?'Pikafish WASM (embedded)':'Pikafish WASM')
+            : 'WASM '+WASM.state+(WASM.failMsg?' ('+WASM.failMsg+')':'')+' → JS engine';
+    var errs=window.__XQ_ERRORS.length?('\n  page errors: '+window.__XQ_ERRORS.slice(0,3).join(' | ')):'\n  page errors: none';
+    banner(all,
+      'AUTOTEST '+(all?'PASS':'FAIL')+(note?' ('+note+')':'')+'\n'
+      +'  engine: '+src+'\n'
+      +'  plies played: '+plies
+      +(first?'  first move: depth '+(first.depth!=null?first.depth:'?')+'  '+(first.timeMs||0)+'ms  '+(first.nps?Math.round(first.nps/1000)+'k nps':''):'')
+      +errs+'\n'
+      +'  total: '+((Date.now()-t0)/1000).toFixed(1)+'s');
+  }
+  /* wait for the engine (file:// embed decode/compile, or the 50MB net) */
+  (function waitReady(){
+    if(WASM.state==='ready'||WASM.state==='failed'){ step(); return; }
+    setTimeout(waitReady,200);
+  })();
+  function step(){
+    if(finished) return;
+    if(S.gameOver || plies>=maxPlies){ finish(true, S.gameOver?'game ended early':''); return; }
+    if(S.think || S.pos.turn!==S.humanColor){ setTimeout(step,100); return; }
+    var str=XQ.positionToString(S.pos.b,S.pos.turn);
+    searchAsync(str,{timeMs:1500,maxDepth:14},function(res){
+      if(finished) return;
+      if(!S.think && !S.gameOver && S.pos.turn===S.humanColor){
+        var mv=(res.move>=0)?res.move:-1;
+        if(mv<0){ var lm=XQ.genMoves(S.pos,true); mv=lm.length?lm[0]:-1; }
+        if(mv<0){ finish(false,'no legal move'); return; }
+        if(plies===0) first=res;
+        S.lastDepth=(res.depth!=null)?res.depth:S.lastDepth;
+        commitMove(mv,false);
+        plies++;
+      }
+      setTimeout(step,50);
+    });
+  }
+  setTimeout(function(){ if(!finished) finish(false,'timeout'); }, 240000);
+}
+
+/* ---- boot ---- */
+function boot(){
+  initMenu(); initControls();
+  // default: enter the menu with a fresh game behind it
+  S.pos=freshPosition(); S.hist=[]; S.notaions=[]; S.moves=[]; S.posHist=[XQ.positionToString(S.pos.b,S.pos.turn)];
+  S.redOnBottom=true; S.nodes=[]; S.sqNode=null;
+  drawLines(); layout(); syncBoard(); refreshChrome(); renderMarks();
+  menuEl.hidden=false; overlayEl.hidden=true;
+  // Deep-linkable start: ?play=red|black  or  ?resume  (useful for PWA shortcuts)
+  if (typeof URLSearchParams !== 'undefined') {
+    try {
+      var q = new URLSearchParams(location.search || '');
+      var pv = q.get('play');
+      if (q.get('demo')) {
+        var K = parseInt(q.get('demo'),10); if(!K) K = 12;
+        newGame('2p', 1); menuEl.hidden = true;
+        for (var i=0;i<K && !S.gameOver;i++){
+          var leg=XQ.genMoves(S.pos,true); if(!leg.length) break;
+          var rr=XQ.rootSearch(S.pos,{timeMs:180,maxDepth:6});
+          if(rr.move<0) break;
+          commitMove(rr.move, false);
+        }
+      } else if (pv) { var c=(pv==='red'||pv==='r'||pv==='1')?1:-1; newGame('ai', c); menuEl.hidden=true; }
+      else if (q.get('resume')) { if (resumeGame()) menuEl.hidden=true; }
+      else if (q.get('autotest') || (location.hash||'').indexOf('autotest')>=0) {
+        S.diff = 1; newGame('ai', 1); menuEl.hidden = true; runAutotest();
+      }
+    } catch(e) {}
+  }
+  window.addEventListener('resize',resizeAll);
+  window.addEventListener('orientationchange',function(){ setTimeout(resizeAll,250); });
+  requestAnimationFrame(resizeAll);
+  // re-layout whenever the board area actually changes size (font load, rotation, window change)
+  if('ResizeObserver' in window){
+    try{ new ResizeObserver(function(){ layout(); }).observe($('boardArea')); }catch(e){}
+  }
+  if(document.fonts && document.fonts.ready){ document.fonts.ready.then(function(){ layout(); }); }
+  // service worker (offline PWA; works only on https/localhost)
+  if('serviceWorker' in navigator && (location.protocol==='https:'||location.hostname==='localhost')){
+    navigator.serviceWorker.register('sw.js').catch(function(){});
+  }
+}
+if(S.mode==='ai') startWasmLoad();   // warm up the tournament engine in the background
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot); else boot();
+
+/* expose for worker bootstrap if engine file is loaded globally (safety) */
+window.XQ = window.XQ || XQ;
+
+/* Test-only hook (inert in production): lets a harness drive the real UI logic */
+if (typeof window !== 'undefined' && window.__XQTEST) {
+  window.__XQTEST = {
+    S:S, XQ:XQ, notateMove:notateMove, legalTargets:legalTargets, commitMove:commitMove,
+    freshPosition:freshPosition, newGame:newGame, aiTurn:aiTurn, hint:hint, undo:undo, flip:flip,
+    layout:layout, pointPx:pointPx, boardSquareFromPoint:boardSquareFromPoint, dPos:dPos,
+    pliesNoCapture:pliesNoCapture, threefold:threefold, fileNum:fileNum, syncBoard:syncBoard,
+    refreshChrome:refreshChrome, drawLines:drawLines, renderMarks:renderMarks, refreshEval:refreshEval,
+    endGame:endGame, onDown:onDown, onMove:onMove, onUp:onUp, evSquare:evSquare, moveOf:moveOf,
+    legal: function(){ return XQ.genMoves(S.pos, true); },
+    count: function(){ var kr=-1,kb=-1,pc=0,b=S.pos.b; for(var s=0;s<90;s++){ if(b[s]===1)kr=s; if(b[s]===-1)kb=s; if(b[s])pc++; } return {kr:kr,kb:kb,pc:pc}; }
+  };
+}
+})();
+</script>
+</body>
+</html>

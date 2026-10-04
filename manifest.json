@@ -1,0 +1,21 @@
+{
+  "name": "中國象棋 · 專業 AI 對弈",
+  "short_name": "中國象棋",
+  "description": "有水準、有難度的中國象棋（Xiangqi）：真實規則、強悍 AI、木質棋盤。",
+  "id": "xiangqi-v2",
+  "lang": "zh-Hant",
+  "dir": "ltr",
+  "start_url": "index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#241a12",
+  "theme_color": "#241a12",
+  "categories": ["games"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
