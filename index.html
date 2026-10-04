@@ -1150,7 +1150,7 @@ function hasSavedGame(){ return !!loadGame(); }
 /* =====================================================================
    Wire up UI
    ===================================================================== */
-function buildSeg(el,items,activeKey,valKey,cb){
+function buildSeg(el,items,activeKey,cb){
   el.innerHTML='';
   items.forEach(function(it){
     var b=document.createElement('button'); b.textContent=it;
