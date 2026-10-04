@@ -925,6 +925,7 @@ function chooseAIMove(res){
    Chrome (status, eval, trays, move list)
    ===================================================================== */
 function refreshStatus(){
+  if(!S.pos) return;   /* guard: startWasmLoad() can call this before boot() sets S.pos */
   if(S.gameOver){
     statusEl.innerHTML = (S.result.winner===0? '和棋' : (S.result.winner===1?'紅方':'黑方')+' 獲勝');
     return;
@@ -990,6 +991,7 @@ function renderMoveList(){
 }
 
 function refreshChrome(){
+  if(!S.pos) return;   /* guard: called by startWasmLoad() before boot() initializes S.pos */
   refreshStatus(); refreshEval(); renderTrays(); renderMoveList();
   document.querySelector('#btnUndo').disabled = S.hist.length===0 || S.think;
   document.querySelector('#btnHint').disabled = S.gameOver || S.think || (S.mode==='ai' && S.pos.turn!==S.humanColor);
