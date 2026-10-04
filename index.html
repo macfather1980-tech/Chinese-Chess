@@ -72,7 +72,8 @@ header.topbar{
 .thinking{ font-style:italic; color:var(--gold); }
 .thinking::after{ content:""; display:inline-block; width:1em; text-align:left; animation:dots 1.2s steps(4,end) infinite; }
 @keyframes dots{ 0%{content:""} 25%{content:"."} 50%{content:".."} 75%{content:"..."} }
-.iconbtn{ background:var(--panel-2); border:1px solid #1c130c; border-radius:10px; padding:6px 9px; font-size:.82rem; color:var(--text); }
+.iconbtn{ background:var(--panel-2); border:1px solid #1c130c; border-radius:10px; padding:6px 9px; font-size:.82rem; color:var(--text);
+  pointer-events:auto; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
 .iconbtn:active{ transform:translateY(1px); }
 .iconbtn.on{ background:linear-gradient(180deg,var(--gold-2),var(--gold)); color:#3a2410; font-weight:700; }
 
@@ -152,10 +153,12 @@ header.topbar{
 
 .controls{ flex:none; display:flex; flex-direction:column; gap:6px; align-items:center; justify-content:center; }
 .seg{ display:flex; background:var(--panel); border:1px solid #1c130c; border-radius:11px; overflow:hidden; }
-.seg button{ background:transparent; border:0; padding:6px 10px; font-size:.78rem; color:var(--text-dim); border-right:1px solid #1c130c; }
+.seg button{ background:transparent; border:0; padding:6px 10px; font-size:.78rem; color:var(--text-dim); border-right:1px solid #1c130c;
+  pointer-events:auto; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
 .seg button:last-child{ border-right:0; }
 .seg button.on{ background:linear-gradient(180deg,var(--gold-2),var(--gold)); color:#3a2410; font-weight:700; }
-.ctlbtn{ background:var(--panel-2); border:1px solid #1c130c; border-radius:10px; padding:6px 11px; font-size:.8rem; }
+.ctlbtn{ background:var(--panel-2); border:1px solid #1c130c; border-radius:10px; padding:6px 11px; font-size:.8rem;
+  pointer-events:auto; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
 .ctlbtn:active{ transform:translateY(1px); }
 .ctlbtn:disabled{ opacity:.4; }
 
@@ -168,7 +171,8 @@ header.topbar{
 
 /* ---- overlays ---- */
 .overlay{ position:fixed; inset:0; z-index:50; display:flex; align-items:center; justify-content:center;
-  background:rgba(18,12,8,.72); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); padding:18px; }
+  background:rgba(18,12,8,.72); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); padding:18px;
+  pointer-events:auto; touch-action:manipulation; }
 .overlay[hidden]{ display:none; }
 .dlg{ width:100%; max-width:360px; background:linear-gradient(180deg,var(--panel-3),var(--panel));
   border:1px solid #15100b; border-radius:20px; box-shadow:var(--shadow); padding:22px 20px; text-align:center; }
@@ -177,7 +181,8 @@ header.topbar{
 .dlg label{ display:block; text-align:left; font-size:.8rem; color:var(--text-dim); margin:14px 2px 6px; }
 .dlg .seg{ width:100%; } .dlg .seg button{ flex:1; text-align:center; }
 .bigbtn{ width:100%; margin-top:8px; padding:13px; border:0; border-radius:13px; font-size:1.05rem; font-weight:700;
-  background:linear-gradient(180deg,var(--gold-2),var(--gold)); color:#3a2410; letter-spacing:.1em; }
+  background:linear-gradient(180deg,var(--gold-2),var(--gold)); color:#3a2410; letter-spacing:.1em;
+  pointer-events:auto; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
 .bigbtn:active{ transform:translateY(1px); }
 .bigbtn.ghost{ background:var(--panel-2); color:var(--text); border:1px solid #1c130c; }
 #ovResult{ font-size:1.7rem; margin-bottom:4px; }
@@ -1162,7 +1167,7 @@ function initMenu(){
   // color
   var mc=$('mColor');
   mc.querySelectorAll('button').forEach(function(b){ b.onclick=function(){ mc.querySelectorAll('button').forEach(function(x){x.className='';}); b.className='on'; S.humanColor=parseInt(b.dataset.color,10); S.aiColor=-S.humanColor; }; });
-  $('mStart').onclick=function(){ newGame(S.mode,S.humanColor); };
+  $('mStart').onclick=function(e){ e.preventDefault(); try{ newGame(S.mode,S.humanColor); }catch(err){ alert('開始對局出錯: '+err.message+'\nLine '+(err.lineNumber||'?')); } };
   $('mContinue').onclick=function(){ if(resumeGame()){ menuEl.hidden=true; } };
   $('mContinue').hidden=!hasSavedGame();
 }
@@ -1291,6 +1296,17 @@ function boot(){
     navigator.serviceWorker.register('sw.js').catch(function(){});
   }
 }
+/* ---- iOS Safari error visibility (backdrop-filter + touch-action can
+      silently swallow events; this banner surfaces any JS error) ---- */
+window.addEventListener('error',function(e){
+  var d=document.createElement('div');
+  d.style.cssText='position:fixed;bottom:0;left:0;right:0;z-index:999;padding:6px 10px;'
+    +'font:11px/1.4 monospace;color:#fff;background:rgba(180,40,40,.92);pointer-events:none;';
+  d.textContent='⚠ '+e.message+' (line '+e.lineno+')';
+  document.body.appendChild(d);
+  setTimeout(function(){ d.remove(); },8000);
+});
+
 if(S.mode==='ai') startWasmLoad();   // warm up the tournament engine in the background
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot); else boot();
 
