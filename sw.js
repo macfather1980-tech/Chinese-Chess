@@ -23,7 +23,7 @@
    * Big assets are pre-cached with retries, and any that are missing are
      re-fetched on every activate (self-heals an interrupted first install).
    */
-const CACHE = 'xq-chess-v2-2026-10-04-b5';
+const CACHE = 'xq-chess-v2-2026-10-04-b6';
 const ASSETS = [
   './',
   './index.html',

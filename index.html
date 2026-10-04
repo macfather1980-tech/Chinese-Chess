@@ -939,9 +939,9 @@ function refreshStatus(){
   var aiInfo=(S.lastDepth!=null?' <span style="opacity:.6">depth '+S.lastDepth+'</span>':'');
   var eng='';
   if(S.mode==='ai'){
-    if(WASM.state==='ready') eng=' <span style="opacity:.55;font-size:.85em">⚡Pikafish'+(WASM.usedEmbedded?'(內置)':'')+'</span>';
-    else if(WASM.state==='loading') eng=' <span style="opacity:.55;font-size:.85em">⚡'+(WASM.netPct>=0?'下載中 '+WASM.netPct+'%':(WASM.netPct===-2?'解碼中':'準備中'))+'</span>';
-    else if(WASM.state==='failed') eng=' <span style="opacity:.45;font-size:.85em" title="'+(WASM.failMsg||'')+'">JS引擎</span>';
+    if(WASM.state==='ready') eng=' <span style="color:var(--gold);font-weight:700">⚡Pikafish'+(WASM.usedEmbedded?'(內置)':'')+'</span>';
+    else if(WASM.state==='loading') eng=' <span style="color:var(--gold);opacity:.8">⚡'+(WASM.netPct>=0?'下載中 '+WASM.netPct+'%':(WASM.netPct===-2?'解碼中':'準備中'))+'</span>';
+    else if(WASM.state==='failed') eng=' <span style="color:var(--bad);font-weight:700" title="'+(WASM.failMsg||'')+'">⚠JS引擎(備用)</span>';
   }
   statusEl.innerHTML = '<span class="turn-dot '+dotCls+'"></span>'+(S.think?'<span class="thinking">AI 思考中</span>':'輪到'+who)+extra+aiInfo+eng;
 }
