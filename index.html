@@ -56,6 +56,18 @@ button{ font-family:inherit; color:inherit; cursor:pointer; }
   calc(env(safe-area-inset-top) + 6px) max(5px, env(safe-area-inset-right))
   calc(env(safe-area-inset-bottom)*0.55 + 6px) max(5px, env(safe-area-inset-left)); gap:6px; }
 
+/* engine badge (always visible in top bar) */
+.eng-badge{ display:inline-flex; align-items:center; gap:5px; flex:none;
+  font-size:.72rem; font-weight:600; letter-spacing:.02em;
+  padding:3px 9px; border-radius:20px; background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.1); white-space:nowrap; }
+.eng-badge .dot{ width:7px; height:7px; border-radius:50%; flex:none; }
+.eng-badge.loading .dot{ background:var(--gold); animation:engPulse 1.2s ease-in-out infinite; }
+.eng-badge.ready .dot{ background:var(--good); }
+.eng-badge.failed .dot{ background:var(--bad); }
+.eng-badge.hidden{ display:none; }
+@keyframes engPulse{ 0%,100%{opacity:.4;transform:scale(.8)} 50%{opacity:1;transform:scale(1.15)} }
+
 header.topbar{
   display:flex; align-items:center; gap:6px;
   background:linear-gradient(180deg,var(--panel-3),var(--panel));
@@ -202,6 +214,7 @@ header.topbar{
 <div id="app">
   <header class="topbar">
     <div class="brand"><b>中國象棋</b><small>XIANGQI · AI</small></div>
+    <span id="engBadge" class="eng-badge hidden"><span class="dot"></span><span id="engTxt"></span></span>
     <div class="status" id="status">準備開始</div>
     <div class="evalmini" title="子力評估"><div class="evalmini-bar"><div id="evalFill"></div><div class="evalmid"></div></div><span id="evalNum">0.0</span></div>
     <button class="iconbtn" id="btnSound" title="音效">🔊</button>
@@ -944,11 +957,13 @@ function refreshStatus(){
     else if(WASM.state==='failed') eng=' <span style="color:var(--bad);font-weight:700" title="'+(WASM.failMsg||'')+'">⚠JS引擎(備用)</span>';
   }
   statusEl.innerHTML = '<span class="turn-dot '+dotCls+'"></span>'+(S.think?'<span class="thinking">AI 思考中</span>':'輪到'+who)+extra+aiInfo+eng;
-  /* Safari tab title = engine status (always visible, easy to confirm) */
-  document.title = '中國象棋 '+(S.mode!=='ai'?'· 雙人格':
-    WASM.state==='ready'?'· ⚡Pikafish':
-    WASM.state==='loading'?'· ⚡'+(WASM.netPct>=0?WASM.netPct+'%':'載入中'):
-    WASM.state==='failed'?'· ⚠JS備用':'· 載入中');
+  /* Safari tab title + on-page engine badge */
+  var eb=$('engBadge'), et=$('engTxt');
+  if(S.mode!=='ai'){ eb.className='eng-badge hidden'; document.title='中國象棋 · 雙人格'; }
+  else if(WASM.state==='ready'){ eb.className='eng-badge ready'; et.textContent='⚡ Pikafish'+(WASM.usedEmbedded?'(內置)':''); document.title='中國象棋 · ⚡Pikafish✅'; }
+  else if(WASM.state==='loading'){ eb.className='eng-badge loading'; et.textContent=WASM.netPct>=0?'⚡ '+WASM.netPct+'%':'⚡ 載入中'; document.title='中國象棋 · ⚡'+(WASM.netPct>=0?WASM.netPct+'%':'載入中'); }
+  else if(WASM.state==='failed'){ eb.className='eng-badge failed'; et.textContent='⚠ JS備用'; document.title='中國象棋 · ⚠JS備用'; }
+  else{ eb.className='eng-badge hidden'; }
 }
 
 function refreshEval(){
