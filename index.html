@@ -539,6 +539,8 @@ function newGame(mode,color){
   S.selected=-1; S.legal=[]; S.lastMove=null; S.lastDepth=null; S.gameOver=false; S.result=null; S.think=false;
   S.redOnBottom = (S.mode==='ai') ? (S.humanColor===1) : true;   // human at the bottom
   S.nodes=[]; S.sqNode=null;
+  /* sync in-game difficulty selector with the menu choice */
+  var ds=$('diffSel'); if(ds){ var btns=ds.querySelectorAll('button'); for(var i=0;i<btns.length;i++) btns[i].className=(i===S.diff)?'on':''; }
   drawLines(); layout(); syncBoard();   // size first so pieces are born at the final scale
   overlayEl.hidden=true; menuEl.hidden=true;
   refreshChrome();
