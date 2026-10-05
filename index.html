@@ -1063,7 +1063,11 @@ function setThink(on){
     thinkStart=Date.now();
     S.thinkInfo=null;
     tsLabel.textContent=(WASM.state==='ready')? '⚡ AI 思考中 · Pikafish' : 'AI 思考中 · JS 引擎';
-    /* floating strip: show, then fade/slide in — no layout shift for the board */
+    /* floating strip: dock it just under the top bar's real bottom edge
+       (header height varies slightly with content/font), then fade/slide in —
+       no layout shift for the board */
+    var tb=document.querySelector('header.topbar');
+    if(tb) thinkStripEl.style.top=(tb.getBoundingClientRect().bottom+2)+'px';
     thinkStripEl.hidden=false;
     thinkStripEl.classList.remove('on');
     void thinkStripEl.offsetWidth;  /* force reflow at opacity:0 so the transition runs */
@@ -1384,17 +1388,20 @@ function runAutotest(){
      tray content growth (legitimate re-layout) are excluded. */
   var trig=null, maxShift=0, lastThink=S.think;
   var traysEl=document.querySelector('.trays');
+  var topbar=document.querySelector('header.topbar');
   var shiftId=setInterval(function(){
     var th=S.think;
     if(th!==lastThink){
       lastThink=th;
       trig={ r:boardFrame.getBoundingClientRect(),
              trH:traysEl? traysEl.getBoundingClientRect().height : 0,
+             hdrH:topbar? topbar.getBoundingClientRect().height : 0,
              until:Date.now()+500 };
     }
     if(!trig) return;
     if(Date.now()>=trig.until){ trig=null; return; }
     if(traysEl && traysEl.getBoundingClientRect().height !== trig.trH){ trig=null; return; }
+    if(topbar && Math.abs(topbar.getBoundingClientRect().height - trig.hdrH) > 0.5){ trig=null; return; }
     var r=boardFrame.getBoundingClientRect();
     var s=Math.max(Math.abs(r.left-trig.r.left),Math.abs(r.right-trig.r.right),
                    Math.abs(r.top-trig.r.top),Math.abs(r.bottom-trig.r.bottom));
