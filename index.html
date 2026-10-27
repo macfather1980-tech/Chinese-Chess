@@ -314,7 +314,10 @@ header.topbar{
     </div>
     <button class="bigbtn" id="mStart">開始對局</button>
     <button class="bigbtn ghost" id="mContinue" hidden>繼續上局</button>
-    <div id="mSw" style="margin-top:12px;font:11px/1.5 ui-monospace,Menlo,monospace;color:var(--text-dim);text-align:center;">離線快取：檢查中…</div>
+    <div id="mStatus" style="margin-top:12px;font:11px/1.5 ui-monospace,Menlo,monospace;color:var(--text-dim);text-align:center;min-height:14px;"></div>
+    <div id="mSw" style="margin-top:2px;font:11px/1.5 ui-monospace,Menlo,monospace;color:var(--text-dim);text-align:center;">離線快取：檢查中…</div>
+    <button class="bigbtn ghost" id="mReset" style="margin-top:10px;">重建離線快取</button>
+    <div style="margin-top:6px;font:10px/1.4 system-ui;color:var(--text-dim);opacity:.7;text-align:center;">清除已存引擎並重新下載（需要網絡）</div>
   </div>
 </div>
 
@@ -1089,6 +1092,15 @@ function chooseAIMove(res){
    ===================================================================== */
 function refreshStatus(){
   if(!S.pos) return;   /* guard: startWasmLoad() can call this before boot() sets S.pos */
+  /* visible engine status in the menu (mobile has no hover for the badge tip) */
+  var ms=$('mStatus');
+  if(ms){
+    var st=WASM.state;
+    if(st==='ready') ms.textContent='AI 引擎：⚡ Pikafish 就緒'+(WASM.usedEmbedded?'（內置副本）':'');
+    else if(st==='loading') ms.textContent='AI 引擎：⚡ 載入中'+(WASM.netPct>=0?(' '+WASM.netPct+'%'):'…');
+    else if(st==='failed') ms.textContent='AI 引擎：⚠ 失敗 → '+(WASM.failMsg||'未知原因');
+    else ms.textContent='AI 引擎：尚未載入';
+  }
   if(S.gameOver){
     statusEl.innerHTML = (S.result.winner===0? '和棋' : (S.result.winner===1?'紅方':'黑方')+' 獲勝');
     return;
@@ -1431,6 +1443,22 @@ function initControls(){
   $('btnRestart').onclick=function(){ newGame(S.mode,S.humanColor); };
   $('btnSound').onclick=function(){ S.sound=!S.sound; $('btnSound').textContent=S.sound?'🔊':'🔇'; if(S.sound) audio(); };
   $('btnMenu').onclick=function(){ menuEl.hidden=false; try{ if(navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({type:'xq-ping'}); }catch(e){} };
+  /* Rebuild the offline cache: clear the (possibly stale/corrupt) service
+     worker + caches + IndexedDB, then reload so the browser installs a clean
+     copy of the current sw.js and re-downloads the engine. */
+  var mReset=$('mReset');
+  if(mReset){
+    mReset.onclick=function(){
+      if(!confirm('重建離線快取？\n\n會清除已下載嘅引擎（約50MB）並重新下載。\n請確保有網絡，然後等 ⚡ Pikafish 變綠。')) return;
+      var steps=[];
+      try{ if('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(function(regs){ regs.forEach(function(r){ r.unregister(); }); }); }catch(e){}
+      try{ if('caches' in window) steps.push(caches.keys().then(function(ks){ return Promise.all(ks.map(function(k){ return caches.delete(k); })); })); }catch(e){}
+      try{ if('indexedDB' in window) steps.push(new Promise(function(res){ var r=indexedDB.deleteDatabase('xq-chess-cache'); r.onsuccess=res; r.onerror=res; r.onblocked=res; })); }catch(e){}
+      mReset.textContent='清除中…（3 秒後重新載入）';
+      var go=function(){ setTimeout(function(){ location.reload(); }, 500); };
+      try{ Promise.all(steps).then(go, go); }catch(e){ go(); }
+    };
+  }
   $('ovAgain').onclick=function(){ newGame(S.mode,S.humanColor); };
   $('ovMenu').onclick=function(){ menuEl.hidden=false; };
   // board pointer

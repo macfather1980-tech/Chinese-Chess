@@ -1,39 +1,39 @@
-# Cloudflare Pages _headers — offline hardening (2026-10-27).
+# Cloudflare Pages _headers — offline hardening (2026-10-27, rev2).
 #
-# Why: the CDN default for static assets is `max-age=0, must-revalidate`.
-# `must-revalidate` means the browser HTTP cache may NOT serve a stale copy,
-# so when the device is offline the SHELL files (document, sw.js, engines)
-# become un-fetchable — and iOS Safari refuses to even route an offline
-# navigation through the service worker for a fresh tab, showing its
-# "cannot open page" error instead.
+# Goal: ONLINE = always fresh, OFFLINE = the HTTP cache serves the last copy.
 #
-# Fix: keep online behaviour instant (max-age=0 => revalidate every load,
-# updates land immediately) while allowing the HTTP cache to serve its
-# stale copy when the revalidation fails (offline) — stale-if-error (RFC
-#5861). Once the document loads, the service worker (v7) takes over and
-# serves everything else from its cache.
+#  * max-age=0            => every request revalidates (updates land immediately)
+#  * stale-if-error=1y    => if that revalidation FAILS (device offline), the
+#                            browser serves the stale copy (RFC 5861)
+#  * NO stale-while-revalidate on shell/code files: SWR would serve STALE code
+#    bytes to online users (the very thing that left phones stuck on an old
+#    sw.js). Code must be fresh online; only the ERROR path may be stale.
 #
-# Deliberately NOT listed: /wasm/pikafish.nnue* — the Cloudflare function
-# sets its own policy (v7: max-age=0 + stale-while-revalidate +
-# stale-iferror, so online requests always revalidate but the browser HTTP
-# cache can serve the stale 50MB offline); the .part files keep the default
-# must-revalidate so a new engine deploy reassembles fresh bytes.
+#  /sw.js is special: it must ALWAYS be the freshest bytes (no-store) so the
+#    browser's service-worker update check detects new versions. A stale SW
+#    script = phones silently stuck on an old offline layer.
+#
+#  Deliberately NOT listed: /wasm/pikafish.nnue* — the Cloudflare function
+#    sets its own policy (max-age=0 + stale-while-revalidate + stale-iferror;
+#    for the 50MB net, serving the cached copy instantly while revalidating in
+#    the background is a feature, not a bug); the .part files keep the default
+#    must-revalidate so a new engine deploy reassembles fresh bytes.
 
 /
-  Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
+  Cache-Control: public, max-age=0, stale-if-error=31536000
 /index.html
-  Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
+  Cache-Control: public, max-age=0, stale-if-error=31536000
 /sw.js
-  Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
+  Cache-Control: no-cache, no-store, must-revalidate
 /engine.js
-  Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
+  Cache-Control: public, max-age=0, stale-if-error=31536000
 /engine-wasm.js
-  Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
+  Cache-Control: public, max-age=0, stale-if-error=31536000
 /manifest.json
-  Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
+  Cache-Control: public, max-age=0, stale-if-error=31536000
 /icons/*
-  Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
+  Cache-Control: public, max-age=0, stale-if-error=31536000
 /wasm/pikafish-single.js
-  Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
+  Cache-Control: public, max-age=0, stale-if-error=31536000
 /wasm/pikafish-single.wasm
-  Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
+  Cache-Control: public, max-age=0, stale-if-error=31536000

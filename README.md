@@ -94,10 +94,16 @@ GitHub Pages 連結照舊運作，兩者內容一致）。
   `max-age=0, must-revalidate` — 離線時 HTTP cache 唔准返舊副本，而 iOS
   Safari 開新 tab 嗰次導航根本唔會交俾 service worker，所以直接彈
   「未連接互聯網」錯誤。而家 `_headers` 為 shell 檔案（`/`、`sw.js`、
-  引擎、icons、manifest）設 `stale-while-revalidate` + `stale-if-error`：
+  引擎、icons、manifest）設 `max-age=0` + `stale-if-error`：
   在線行為唔變（每次重新驗證、更新即時落地），離線時 HTTP cache 會返返
   上次嗰份；頁面載入後由 service worker（v7）接管其餘全部資源。
+  有意**唔加** `stale-while-revalidate` 喺 shell/代碼檔（會令在線用戶收到舊代碼）；
+  `/sw.js` 特別用 `no-store` — SW 腳本必須永遠係最新位元組，否則瀏覽器嘅
+  SW 更新檢查會收到舊版本 → 手機永遠卡喺舊離線層（2026-10-27 實測根因）。
   （`/wasm/pikafish.nnue*` 故意唔加 — function 自己有 cache policy）
+* **menu 新增**：「AI 引擎」狀態行（顯示失敗原因）+「重建離線快取」掣
+  （清除 service worker + caches + IndexedDB 後重新載入 — 手機卡喺舊 SW 時
+  用呢個復原）。
 * **離線第三層（2026-10-27 v7，三重保障）**：iPhone 實測發現 50MB 網絡
   入唔住 service worker cache（v6 寫 cache 時抹走咗 `Cache-Control`，
   WebKit 會將無 lifetime 嘅 entry 當 best-effort 很快淘汰）。而家：
