@@ -83,6 +83,13 @@ GitHub Pages 連結照舊運作，兩者內容一致）。
     所以 GitHub Pages 連結完全不受影響。
 * **更新流程**：改代碼 → commit → push 到 `main` → Cloudflare 自動
   重新部署（免費方案每月 500 builds）。
+* **離線（2026-10-27 v6 修復）**：Cloudflare function 用 `no-store`
+  （防止 CDN 釘死舊引擎位），但 Cache API 會靜默拒收 no-store 回應，
+  50MB 網絡原本永遠入唔到 service worker cache → 離線/重開 App 玩唔到
+  Pikafish。而家 `sw.js` 會喺寫 cache 前 strip 掉 `no-store`（返返 app
+  嗰份唔變），另外 cache miss 會先嘗試網絡先至回落 503（fresh install
+  首次下載）。**首次要有網絡**（下載 50MB），之後飛機模式照玩；
+  未下載完就離線 → 自動用 ⚠ JS 備用引擎。
 * **重新編譯引擎後**（`./build-wasm.sh`）：除咗照舊做 `build-assets.py`，
   仲要重新拆 parts + 更新份數檔：
   ```sh

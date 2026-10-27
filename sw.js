@@ -2,6 +2,14 @@
    NOTE: registers only over https or localhost (secure context). On a plain
    http LAN URL the game still runs fully; the SW simply won't activate.
 
+   v6 (2026-10-27-b9) — fixed OFFLINE engine play on Cloudflare:
+   * The Cloudflare reassembly function tags the 50MB net response with
+     `Cache-Control: no-store` (so the CDN never pins stale engine bytes).
+     The Cache API silently refuses to store no-store responses, so the net
+     was NEVER entering the SW cache → offline / re-opened apps could not
+     load Pikafish. put() now strips no-store before caching.
+   * Big assets on a cache MISS now fall through to the network instead of
+     returning the 503 placeholder (fresh installs could not download).
    v5 (2026-10-05-b8) — engine-wasm.js re-shipped (live "info" progress
    stream so the UI shows the AI thinking in real time); refreshed
    assets-embedded.js accordingly. Bump for cache refresh on update.
@@ -27,7 +35,7 @@
    * Big assets are pre-cached with retries, and any that are missing are
      re-fetched on every activate (self-heals an interrupted first install).
    */
-const CACHE = 'xq-chess-v2-2026-10-05-b8';
+const CACHE = 'xq-chess-v2-2026-10-27-b9';
 const ASSETS = [
   './',
   './index.html',
@@ -57,8 +65,26 @@ function isBig(url) {
   return BIG_ASSETS.some((a) => p.endsWith(a.replace(/^\.\//, '')));
 }
 
+/* The Cloudflare function serves the 50MB net with `Cache-Control: no-store`
+   (so the CDN never pins stale engine bytes across deploys). The Cache API
+   silently refuses to store no-store responses — neither put() nor add() —
+   so normalize a copy for our cache while the app keeps the original. */
+function normalizeForCache(res) {
+  const cc = res.headers.get('cache-control');
+  if (cc && /no-store/i.test(cc)) {
+    const h = new Headers(res.headers);
+    h.delete('cache-control');
+    return new Response(res.body, { status: res.status, headers: h });
+  }
+  return res;
+}
+
 function addRetry(cache, url, tries) {
-  return cache.add(url).catch((e) => {
+  // `cache.add()` would silently drop no-store responses, so fetch+put by hand.
+  return fetch(url).then((r) => {
+    if (!r.ok) throw new Error('bad status for ' + url);
+    return cache.put(url, normalizeForCache(r));
+  }).catch((e) => {
     if (tries > 1) {
       return new Promise((r) => setTimeout(r, 2000)).then(() => addRetry(cache, url, tries - 1));
     }
@@ -117,7 +143,7 @@ self.addEventListener('fetch', (event) => {
   const url = event.request.url;
   const put = (res) => {
     if (res && res.status === 200 && res.type === 'basic') {
-      const copy = res.clone();
+      const copy = normalizeForCache(res.clone());
       caches.open(CACHE).then((cache) => cache.put(event.request, copy)).catch(() => {});
     }
     return res;
@@ -134,7 +160,10 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     isBig(url)
       ? chainMatch().then((cached) =>
-          cached ? cached : fetch(event.request).then(put)   // cache-first, fetch to warm
+          // cache-first; on a miss (503 placeholder) fall through to the
+          // network, and only if THAT fails (offline) serve the 503.
+          (cached && cached.ok) ? cached
+          : fetch(event.request).then(put).catch(() => cached)
         )
       : fetch(event.request).then(put).catch(chainMatch)     // network-first, cache fallback
   );
