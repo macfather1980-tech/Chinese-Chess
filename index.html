@@ -1442,7 +1442,7 @@ function initControls(){
   $('btnFlip').onclick=flip;
   $('btnRestart').onclick=function(){ newGame(S.mode,S.humanColor); };
   $('btnSound').onclick=function(){ S.sound=!S.sound; $('btnSound').textContent=S.sound?'🔊':'🔇'; if(S.sound) audio(); };
-  $('btnMenu').onclick=function(){ menuEl.hidden=false; try{ if(navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({type:'xq-ping'}); }catch(e){} };
+  $('btnMenu').onclick=function(){ menuEl.hidden=false; probeOfflineCache(); try{ if(navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({type:'xq-ping'}); }catch(e){} };
   /* Rebuild the offline cache: clear the (possibly stale/corrupt) service
      worker + caches + IndexedDB, then reload so the browser installs a clean
      copy of the current sw.js and re-downloads the engine. */
@@ -1600,17 +1600,48 @@ function boot(){
   // service worker (offline PWA; works only on https/localhost)
   var mSwEl=$('mSw');
   if('serviceWorker' in navigator && (location.protocol==='https:'||location.hostname==='localhost')){
-    navigator.serviceWorker.addEventListener('message',function(e){
-      var d=(e.data && e.data.type==='xq-sw') ? e.data : null;
-      if(d && d.ver && mSwEl) mSwEl.textContent='離線快取：'+d.ver+' ✓';
-    });
-    navigator.serviceWorker.register('sw.js').catch(function(){ if(mSwEl) mSwEl.textContent='離線快取：註冊失敗'; });
+    navigator.serviceWorker.register('sw.js').catch(function(){ if(mSwEl){ mSwEl.style.color='var(--bad)'; mSwEl.textContent='離線快取：註冊失敗'; } });
+    // Self-check the offline cache (page-side; robust to SW messaging races).
+    probeOfflineCache();
+    try{ navigator.serviceWorker.ready.then(probeOfflineCache); }catch(e){}
+    setTimeout(probeOfflineCache, 4000);
   } else if(location.protocol==='file:' && mSwEl){
     mSwEl.textContent='離線：內建引擎（唔使網絡）';
   } else if(mSwEl){
     mSwEl.textContent='離線快取：唔可用（HTTP）';
   }
 }
+/* ---- Offline-cache self-check (page-side; robust to SW messaging races) ----
+   Reads the actual Cache Storage + IndexedDB to report whether the 50MB net
+   is persisted. This is the source of truth for the menu's "離線快取" line —
+   it does NOT rely on a service-worker→page message (which iOS may drop). */
+var SW_CACHE_NAME='xq-chess-v2-2026-10-27-b10';   // must match CACHE in sw.js
+function probeOfflineCache(){
+  var el=$('mSw'); if(!el) return;
+  el.style.color='var(--text-dim)'; el.textContent='離線快取：檢查中…';
+  function idbHasNet(){
+    if(!('indexedDB' in window)) return Promise.resolve(false);
+    return idbGetNet().then(function(v){ return !!v; }).catch(function(){ return false; });
+  }
+  function swHasNet(){
+    if(!('caches' in window)) return Promise.resolve(false);
+    var netUrl=new URL('wasm/pikafish.nnue', location.href).href;
+    return caches.keys().then(function(keys){
+      var list=[SW_CACHE_NAME].concat(keys.filter(function(k){ return k!==SW_CACHE_NAME; }));
+      function t(i){
+        if(i>=list.length) return Promise.resolve(false);
+        return caches.open(list[i]).then(function(c){ return c.match(netUrl,{ignoreSearch:true}); })
+          .then(function(r){ return r ? true : t(i+1); }).catch(function(){ return t(i+1); });
+      }
+      return t(0);
+    }).catch(function(){ return false; });
+  }
+  Promise.all([idbHasNet(), swHasNet()]).then(function(r){
+    if(r[0]||r[1]){ el.style.color='var(--good)'; el.textContent='離線快取：✓ 就緒（引擎已存，離線可玩）'; }
+    else { el.style.color='var(--bad)'; el.textContent='離線快取：尚未存（下載完會自動存）'; }
+  });
+}
+
 /* ---- iOS Safari error visibility (backdrop-filter + touch-action can
       silently swallow events; this banner surfaces any JS error) ---- */
 window.addEventListener('error',function(e){
