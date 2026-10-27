@@ -314,6 +314,7 @@ header.topbar{
     </div>
     <button class="bigbtn" id="mStart">開始對局</button>
     <button class="bigbtn ghost" id="mContinue" hidden>繼續上局</button>
+    <div id="mSw" style="margin-top:12px;font:11px/1.5 ui-monospace,Menlo,monospace;color:var(--text-dim);text-align:center;">離線快取：檢查中…</div>
   </div>
 </div>
 
@@ -1429,7 +1430,7 @@ function initControls(){
   $('btnFlip').onclick=flip;
   $('btnRestart').onclick=function(){ newGame(S.mode,S.humanColor); };
   $('btnSound').onclick=function(){ S.sound=!S.sound; $('btnSound').textContent=S.sound?'🔊':'🔇'; if(S.sound) audio(); };
-  $('btnMenu').onclick=function(){ menuEl.hidden=false; };
+  $('btnMenu').onclick=function(){ menuEl.hidden=false; try{ if(navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({type:'xq-ping'}); }catch(e){} };
   $('ovAgain').onclick=function(){ newGame(S.mode,S.humanColor); };
   $('ovMenu').onclick=function(){ menuEl.hidden=false; };
   // board pointer
@@ -1569,8 +1570,17 @@ function boot(){
   }
   if(document.fonts && document.fonts.ready){ document.fonts.ready.then(function(){ layout(); }); }
   // service worker (offline PWA; works only on https/localhost)
+  var mSwEl=$('mSw');
   if('serviceWorker' in navigator && (location.protocol==='https:'||location.hostname==='localhost')){
-    navigator.serviceWorker.register('sw.js').catch(function(){});
+    navigator.serviceWorker.addEventListener('message',function(e){
+      var d=(e.data && e.data.type==='xq-sw') ? e.data : null;
+      if(d && d.ver && mSwEl) mSwEl.textContent='離線快取：'+d.ver+' ✓';
+    });
+    navigator.serviceWorker.register('sw.js').catch(function(){ if(mSwEl) mSwEl.textContent='離線快取：註冊失敗'; });
+  } else if(location.protocol==='file:' && mSwEl){
+    mSwEl.textContent='離線：內建引擎（唔使網絡）';
+  } else if(mSwEl){
+    mSwEl.textContent='離線快取：唔可用（HTTP）';
   }
 }
 /* ---- iOS Safari error visibility (backdrop-filter + touch-action can

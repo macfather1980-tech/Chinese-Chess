@@ -44,6 +44,7 @@
      fallback chain is CACHE → BACKUPS → (for big) network.
    */
 const CACHE = 'xq-chess-v2-2026-10-27-b10';
+const SW_VER = String(CACHE).replace(/^xq-chess-v2-/, '');   // shown in the app menu
 const ASSETS = [
   './',
   './index.html',
@@ -211,6 +212,11 @@ self.addEventListener('activate', (event) => {
     for (const k of shellOk.slice(0, -1)) await caches.delete(k);
     BACKUPS = shellOk.slice(-1);
     console.log('[sw] activated', CACHE, 'backup:', BACKUPS[0] || 'none');
+    // Tell open clients which SW version is in charge (shown in the app menu —
+    // so the user can verify the offline layer actually updated).
+    self.clients.matchAll().forEach((c) => {
+      try { c.postMessage({ type: 'xq-sw', ver: SW_VER }); } catch (e) { /* noop */ }
+    });
     // 2) self-heal big assets in the background (adopt-from-backup, else
     //    download). Deliberately NOT awaited — activation must stay quick.
     //    Once the new cache is complete, prune the backup (a 50MB entry
@@ -226,6 +232,16 @@ self.addEventListener('activate', (event) => {
       }
     }).catch(() => {});
   })());
+});
+
+self.addEventListener('message', (event) => {
+  // The app pings when its menu opens (in case the activate broadcast was
+  // missed because the page script started later).
+  try {
+    if (event.data && event.data.type === 'xq-ping' && event.source) {
+      event.source.postMessage({ type: 'xq-sw', ver: SW_VER });
+    }
+  } catch (e) { /* noop */ }
 });
 
 self.addEventListener('fetch', (event) => {
