@@ -14,7 +14,9 @@
 //
 // GitHub Pages ignores this file (it only serves static assets), so the
 // existing Pages link keeps fetching the full file directly.
-export default async function onRequest(context) {
+// NOTE: must be a NAMED export (not `export default`) — the Pages Functions
+// route scanner only registers files that export `onRequest*` by name.
+export async function onRequest(context) {
   const origin = new URL(context.request.url).origin;
 
   // Part count lives in a tiny text file so re-building the engine only
