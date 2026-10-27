@@ -65,6 +65,27 @@ python3 build-assets.py  # 2. 重新生成 assets-embedded.js
 * 引擎時間已實測準確：設 100ms / 1s / 5s 就實打實諗咁耐（毫秒級吻合），
   進度行（info）完整收到；技術細節睇 `wasm/README-wasm.md`。
 
+## iOS 主畫面 App 白色底邊（2026-10-27 修復，v8/b11）
+
+* iPhone「加入主畫面」安裝嘅 web app 有 WebKit bug（[#254868](https://bugs.webkit.org/show_bug.cgi?id=254868)）：
+  `height:100%` / `100svh` / `100dvh` / `visualViewport.height` 全部會扣走
+  下方 home indicator 安全區（約 34pt），而 `100vh` 唔會扣 — 所以 app 底部
+  露出一條 webview 白色底邊（Android 同普通 Safari 冇呢個問題）。
+* 修復（`index.html`，三層保險）：
+  1. shell 改用 `min-height:100vh`（standalone 下 = 全螢幕）— WebKit 會將
+     layout viewport 伸到全 window（bug [#210009](https://bugs.webkit.org/show_bug.cgi?id=210009)），
+     背景畫入底邊；`#app`（fixed inset:0）跟住變高 → 棋盤自動用返嗰 34pt
+     （棋盤微度變大 = 真正「最大化」）。
+  2. `bleedFix()`：standalone 下若 `screen.height − innerHeight` 係 1–150pt
+     嘅 gap，就用 px 伸返 html/body 做雙保險。
+  3. `#bleed`：一圈 overflow 出 layout viewport 嘅深色邊環，邊度有白邊
+     就覆蓋邊度；正常環境（desktop / Android / 普通 Safari）完全 off-screen，
+     零影響。
+* 驗證：開 menu →「離線快取」顯示 `2026-10-27-b11` 即新代碼落地；底邊變深、
+  棋盤變大即成功。萬一極少數機型仍有白邊：長按刪除主畫面圖標 → Safari
+  重開連結 → 重新「加入主畫面」（manifest 深色 `background_color` 會喺
+  安裝時生效）。
+
 ## Cloudflare Pages 部署（2026-10-27 加入）
 
 **官方公開連結**：`https://chinese-chess-8ca.pages.dev`（QR code 由此產生；

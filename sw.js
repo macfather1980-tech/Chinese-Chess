@@ -2,6 +2,17 @@
    NOTE: registers only over https or localhost (secure context). On a plain
    http LAN URL the game still runs fully; the SW simply won't activate.
 
+   v8 (2026-10-27-b11) — iOS Home Screen app "white chin" fix
+   (index.html only, no SW logic changes): WebKit bug 254868 — in
+   installed web apps height:100%/svh/dvh/visualViewport all report
+   the screen minus the home-indicator safe area, leaving a white
+   strip below the app. The shell is now min-height:100vh (+ px-level
+   bleedFix backup + a full-bleed #bleed ring), which makes the page
+   paint that strip and the layout viewport grow to the full window
+   (bug 210009). This cache-name bump makes the fixed index.html part
+   of the offline cache from the first online load, and the menu's
+   offline-layer readout shows b11 so users can verify the update.
+
    v7 (2026-10-27-b10) — fixed "⚠ JS備用 offline after a SW version bump"
    (seen on iPhone: the 50MB net was gone from the SW cache):
    * Every cached response is stored with `max-age=31536000, immutable`.
@@ -43,7 +54,7 @@
      previous cache that can serve the shell is kept as a BACKUP; the fetch
      fallback chain is CACHE → BACKUPS → (for big) network.
    */
-const CACHE = 'xq-chess-v2-2026-10-27-b10';
+const CACHE = 'xq-chess-v2-2026-10-27-b11';
 const SW_VER = String(CACHE).replace(/^xq-chess-v2-/, '');   // shown in the app menu
 const ASSETS = [
   './',

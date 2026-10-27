@@ -33,10 +33,34 @@
   --good:#7bbf6a; --bad:#d4604e;
   --radius:14px;
   --cell:70px;               /* piece sizing, set in JS */
+  --bleed:70px;              /* full-bleed ring overflow; bleedFix() retunes it on iOS installed web apps */
   --shadow:0 8px 22px rgba(0,0,0,.45);
 }
 *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none; }
-html,body{ margin:0; height:100%; }
+
+/* =====================================================================
+   iOS home-screen (installed) web apps — full-height shell
+   =====================================================================
+   WebKit bug 254868 (open): in *installed* Home Screen web apps, the
+   reduced viewport measures — height:100%, 100svh, 100dvh,
+   -webkit-fill-available, visualViewport.height — all resolve to the
+   screen MINUS the bottom safe area (the home-indicator strip, ~34pt)
+   even with viewport-fit=cover in the viewport meta, while 100vh keeps
+   including it. The shell was height:100% → it stopped ~34pt short of
+   the physical bottom and the webview's white window background showed
+   through as a "chin" (Android and regular Safari are unaffected).
+
+   Fix: min-height:100vh on the shell. In standalone mode 100vh spans
+   the full window, so the page background paints the strip, and WebKit
+   grows the layout viewport to fit content that overflows it (bug
+   210009) — #app (position:fixed inset:0) then resolves to the grown
+   viewport, so the board scales to use the extra 34pt too. In every
+   non-quirky environment 100vh == 100%, so this is a no-op there.
+   bleedFix() (JS) adds a px-level backup for builds where 100vh is
+   reduced as well; #bleed paints a full-bleed dark ring into any strip
+   the layout viewport still leaves behind. */
+html,body{ margin:0; height:100%; min-height:100vh; overflow:hidden; }
+html{ background:var(--bg-0); }   /* any strip the body box does not reach stays dark, never white */
 body{
   font-family:"Kaiti TC","Kaiti SC","STKaiti","DFKai-SB","Noto Serif TC","Songti TC","PingFang TC",serif;
   color:var(--text);
@@ -46,6 +70,23 @@ body{
   touch-action:none;
   user-select:none;
   -webkit-user-select:none;
+}
+
+/* Full-bleed underlay ring: a transparent box with a --bleed-thick dark
+   border, inset so the border lands exactly on the margin AROUND the
+   layout viewport. It covers any strip WebKit leaves unpainted (the
+   installed-app home-indicator chin; also the side insets in
+   landscape). In environments where the viewport reaches the physical
+   edge (regular Safari, Android, desktop) the ring is entirely
+   off-screen: a no-op. bleedFix() retunes --bleed to the measured gap.
+   z-index:-1 keeps it under the app UI; pointer-events:none keeps the
+   board gestures intact. */
+#bleed{
+  position:fixed; z-index:-1; pointer-events:none;
+  top:calc(-1 * var(--bleed, 70px)); left:calc(-1 * var(--bleed, 70px));
+  right:calc(-1 * var(--bleed, 70px)); bottom:calc(-1 * var(--bleed, 70px));
+  background:transparent;
+  border:var(--bleed, 70px) solid var(--bg-0);
 }
 button{ font-family:inherit; color:inherit; cursor:pointer; }
 
@@ -250,6 +291,7 @@ header.topbar{
 </head>
 <body>
 
+<div id="bleed" aria-hidden="true"></div>
 <div id="app">
   <header class="topbar">
     <div class="brand"><b>中國象棋</b><small>XIANGQI · AI</small></div>
@@ -1468,7 +1510,38 @@ function initControls(){
   boardFrame.addEventListener('pointercancel',function(){ if(pStart){ var d=dragNodeIdx; pStart=null; if(d>=0){var n=S.nodes[d]; if(n){ n.el.classList.remove('lift'); snapNode(n); } dragNodeIdx=-1; } renderMarks(); } });
 }
 
-function resizeAll(){ layout(); }
+/* iOS home-screen (installed) web app — px-level backup for the CSS
+   min-height:100vh fix above. Some WebKit builds report 100vh reduced
+   too (bug 254868), in which case the CSS alone cannot grow the shell.
+   If the physical window (screen) is a plausible safe-area gap (1–150pt)
+   taller than the layout viewport, stretch html/body to the exact window
+   height: WebKit grows the layout viewport to fit overflowing content
+   (bug 210009), the background paints the strip and #app (fixed) picks
+   up the extra height. Gated to standalone display so desktop / Android
+   / regular Safari keep the CSS-only no-op. */
+var bleedSig = null;
+function bleedFix(){
+  var standalone = false;
+  try{ standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true; }catch(e){}
+  var gap = (standalone && screen && screen.height) ? (Math.ceil(screen.height) - Math.floor(window.innerHeight)) : 0;
+  var doc = document.documentElement;
+  if(standalone && gap > 1 && gap < 150){
+    var h = Math.floor(window.innerHeight) + gap;
+    if(bleedSig !== h){
+      bleedSig = h;
+      doc.style.minHeight = h + 'px';
+      document.body.style.minHeight = h + 'px';
+      doc.style.setProperty('--bleed', (gap + 40) + 'px');
+    }
+  } else if(bleedSig !== null){
+    bleedSig = null;
+    doc.style.minHeight = '';
+    document.body.style.minHeight = '';
+    doc.style.setProperty('--bleed', '70px');
+  }
+}
+
+function resizeAll(){ bleedFix(); layout(); }
 
 /* =====================================================================
    #autotest — end-to-end self test (dev/CI hook)
@@ -1591,6 +1664,12 @@ function boot(){
   }
   window.addEventListener('resize',resizeAll);
   window.addEventListener('orientationchange',function(){ setTimeout(resizeAll,250); });
+  if(window.visualViewport){
+    try{
+      visualViewport.addEventListener('resize',function(){ bleedFix(); });
+      visualViewport.addEventListener('scroll',function(){ bleedFix(); });
+    }catch(e){}
+  }
   requestAnimationFrame(resizeAll);
   // re-layout whenever the board area actually changes size (font load, rotation, window change)
   if('ResizeObserver' in window){
