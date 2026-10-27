@@ -1387,16 +1387,20 @@ function hint(){
 function undo(){
   if(S.think||S.gameOver) return;
   if(S.mode==='ai'){
-    // undo until it's the human's turn (up to 2 plies)
+    // 悔棋 = redo the player's OWN mistaken move. Undo two plies:
+    //   1) the AI's most recent reply (if any), then
+    //   2) the player's last move.
+    // This returns the board to the position just before the player's move
+    // (so any piece the AI took with it is restored) with the player to move
+    // again. Keyed on moverColor (not turn) so it is right no matter who opens.
     var n=0;
-    while(S.hist.length && (S.pos.turn===S.humanColor) && n<2){ popOne(); n++; }
-    if(!n && S.hist.length){ popOne(); }   // at least one
-    if(!S.hist.length) return;
-    // ensure it's the human's turn; if AI would move, do it
-    rebuildAll();
-  } else { popOne(); rebuildAll(); }
+    while(S.hist.length && S.hist[S.hist.length-1].moverColor!==S.humanColor && n<4){ popOne(); n++; }
+    if(S.hist.length && S.hist[S.hist.length-1].moverColor===S.humanColor){ popOne(); n++; }
+  } else { popOne(); }
+  rebuildAll();
   S.gameOver=false; S.result=null; overlayEl.hidden=true;
   saveGame();
+  // Should now be the player's turn; only let the AI move if it genuinely is.
   if(S.mode==='ai' && S.pos.turn!==S.humanColor) aiTurn();
 }
 function popOne(){
@@ -1694,7 +1698,7 @@ function boot(){
    Reads the actual Cache Storage + IndexedDB to report whether the 50MB net
    is persisted. This is the source of truth for the menu's "離線快取" line —
    it does NOT rely on a service-worker→page message (which iOS may drop). */
-var SW_CACHE_NAME='xq-chess-v2-2026-10-27-b10';   // must match CACHE in sw.js
+var SW_CACHE_NAME='xq-chess-v2-2026-10-27-b11';   // must match CACHE in sw.js
 function probeOfflineCache(){
   var el=$('mSw'); if(!el) return;
   el.style.color='var(--text-dim)'; el.textContent='離線快取：檢查中…';
