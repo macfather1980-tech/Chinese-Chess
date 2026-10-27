@@ -30,7 +30,7 @@
   Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
 /manifest.json
   Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
-/icons/
+/icons/*
   Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
 /wasm/pikafish-single.js
   Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
