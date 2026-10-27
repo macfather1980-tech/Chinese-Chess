@@ -89,3 +89,5 @@ GitHub Pages 連結照舊運作，兩者內容一致）。
   cd wasm && rm -f pikafish.nnue.part-* && split -b 20000000 pikafish.nnue pikafish.nnue.part- && i=1; for f in pikafish.nnue.part-*; do mv "$f" "pikafish.nnue.part-$i"; i=$((i+1)); done; printf '%s' $(ls pikafish.nnue.part-[0-9]* | wc -l) > pikafish.nnue.parts
   ```
   然後 commit + push（记得連 parts 一起 commit）。
+
+<!-- webhook test 20261027 -->
