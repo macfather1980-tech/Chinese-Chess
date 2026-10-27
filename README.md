@@ -33,7 +33,7 @@ engine-wasm.js         Pikafish worker 橋
 wasm/pikafish-single.js / .wasm   Emscripten 編譯嘅 Pikafish（~0.6MB）
 wasm/pikafish.nnue     官方 NNUE 網絡（50MB）
 assets-embedded.js     上面四個嘅 base64 合集（~67MB，generated）
-sw.js                  Service Worker（離線 PWA，b3）
+sw.js                  Service Worker（離線 PWA，v6/b9）
 serve.py               本地 LAN server（可選）
 build-wasm.sh          重新編譯 Pikafish → wasm/
 build-assets.py        重新打包 assets-embedded.js
@@ -90,6 +90,14 @@ GitHub Pages 連結照舊運作，兩者內容一致）。
   嗰份唔變），另外 cache miss 會先嘗試網絡先至回落 503（fresh install
   首次下載）。**首次要有網絡**（下載 50MB），之後飛機模式照玩；
   未下載完就離線 → 自動用 ⚠ JS 備用引擎。
+* **離線第二層（2026-10-27，`_headers` 檔）**：Cloudflare CDN 預設
+  `max-age=0, must-revalidate` — 離線時 HTTP cache 唔准返舊副本，而 iOS
+  Safari 開新 tab 嗰次導航根本唔會交俾 service worker，所以直接彈
+  「未連接互聯網」錯誤。而家 `_headers` 為 shell 檔案（`/`、`sw.js`、
+  引擎、icons、manifest）設 `stale-while-revalidate` + `stale-if-error`：
+  在線行為唔變（每次重新驗證、更新即時落地），離線時 HTTP cache 會返返
+  上次嗰份；頁面載入後由 service worker（v6）接管其餘全部資源。
+  （`/wasm/pikafish.nnue*` 故意唔加 — function 要 no-store 確保引擎最新）
 * **重新編譯引擎後**（`./build-wasm.sh`）：除咗照舊做 `build-assets.py`，
   仲要重新拆 parts + 更新份數檔：
   ```sh

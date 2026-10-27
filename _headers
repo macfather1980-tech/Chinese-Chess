@@ -1,0 +1,38 @@
+# Cloudflare Pages _headers — offline hardening (2026-10-27).
+#
+# Why: the CDN default for static assets is `max-age=0, must-revalidate`.
+# `must-revalidate` means the browser HTTP cache may NOT serve a stale copy,
+# so when the device is offline the SHELL files (document, sw.js, engines)
+# become un-fetchable — and iOS Safari refuses to even route an offline
+# navigation through the service worker for a fresh tab, showing its
+# "cannot open page" error instead.
+#
+# Fix: keep online behaviour instant (max-age=0 => revalidate every load,
+# updates land immediately) while allowing the HTTP cache to serve its
+# stale copy when the revalidation fails (offline) — stale-if-error (RFC
+#5861). Once the document loads, the service worker (v6) takes over and
+# serves everything else from its cache.
+#
+# Deliberately NOT listed: /wasm/pikafish.nnue* (the Cloudflare function
+# returns no-store; the parts must keep instant revalidation so the
+# function always reassembles the freshest engine bytes) — and the 50MB
+# net is cached client-side by the SW, not the HTTP cache.
+
+/
+  Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
+/index.html
+  Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
+/sw.js
+  Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
+/engine.js
+  Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
+/engine-wasm.js
+  Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
+/manifest.json
+  Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
+/icons/
+  Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
+/wasm/pikafish-single.js
+  Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
+/wasm/pikafish-single.wasm
+  Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
