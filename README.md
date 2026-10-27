@@ -64,3 +64,28 @@ python3 build-assets.py  # 2. 重新生成 assets-embedded.js
 * `assets-embedded.js` 係 generated file — 唔好手改；唔好放進 editor。
 * 引擎時間已實測準確：設 100ms / 1s / 5s 就實打實諗咁耐（毫秒級吻合），
   進度行（info）完整收到；技術細節睇 `wasm/README-wasm.md`。
+
+## Cloudflare Pages 部署（2026-10-27 加入）
+
+**官方公開連結**：`https://chinese-chess-8ca.pages.dev`（QR code 由此產生；
+GitHub Pages 連結照舊運作，兩者內容一致）。
+
+* Cloudflare 有**每個檔案 25 MiB** 上限，而 `wasm/pikafish.nnue` 係 47.7 MiB、
+  `assets-embedded.js` 係 64.4 MiB — 兩者都唔俾直接上载。
+* 解法（**遊戲代碼零改動**）：
+  * `wasm/pikafish.nnue.part-1…3`（每份 ≤19 MiB）+ `wasm/pikafish.nnue.parts`
+    （寫住份數 `3`）——build 時隨倉部署。
+  * `functions/wasm/pikafish.nnue.js`（Cloudflare Pages Function）：將 parts
+    串流拼返做同一個 `wasm/pikafish.nnue` 回應（Content-Length 正確，
+    下載進度條正常；service worker 照常 cache-first 快取整份）。
+  * Pages build 用 `tar` 將可發佈內容複製去 `dist/`（排除兩個超標大檔
+    同 `.git`），output directory = `dist`。兩個大檔**照留喺 repo**，
+    所以 GitHub Pages 連結完全不受影響。
+* **更新流程**：改代碼 → commit → push 到 `main` → Cloudflare 自動
+  重新部署（免費方案每月 500 builds）。
+* **重新編譯引擎後**（`./build-wasm.sh`）：除咗照舊做 `build-assets.py`，
+  仲要重新拆 parts + 更新份數檔：
+  ```sh
+  cd wasm && rm -f pikafish.nnue.part-* && split -b 20000000 pikafish.nnue pikafish.nnue.part- && i=1; for f in pikafish.nnue.part-*; do mv "$f" "pikafish.nnue.part-$i"; i=$((i+1)); done; printf '%s' $(ls pikafish.nnue.part-[0-9]* | wc -l) > pikafish.nnue.parts
+  ```
+  然後 commit + push（记得連 parts 一起 commit）。
