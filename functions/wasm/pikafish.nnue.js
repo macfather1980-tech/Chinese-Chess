@@ -8,9 +8,13 @@
 //
 // The game code is UNCHANGED: it still fetches `wasm/pikafish.nnue`; this
 // function reassembles the parts into one byte stream (with a correct
-// Content-Length, so the in-app download progress works). The service
-// worker caches the concatenated result, so it is downloaded once per
-// device per engine version (same as before).
+// Content-Length, so the in-app download progress works). Offline layers
+// for the result: (1) the client service worker cache (sw.js stores it as
+// immutable), (2) the browser HTTP cache via the stale-iferror policy above,
+// (3) the app's IndexedDB mirror (index.html). Downloaded once per device
+// per engine version.
+// NOTE: the parts themselves keep `max-age=0, must-revalidate` (default) so
+// a new engine deploy reassembles fresh bytes on the very next request.
 //
 // GitHub Pages ignores this file (it only serves static assets), so the
 // existing Pages link keeps fetching the full file directly.
@@ -64,9 +68,14 @@ export async function onRequest(context) {
 
   const headers = new Headers({
     'content-type': 'application/octet-stream',
-    // Dynamic reassembly: never CDN-cache (the client service worker is the
-    // cache; an engine re-deploy must be visible immediately).
-    'cache-control': 'no-store',
+    // Cache policy (v7, 2026-10-27): revalidate on EVERY online request
+    // (max-age=0 — a fresh engine deploy is visible immediately), but keep
+    // the stored copy usable when revalidation cannot run (offline):
+    // stale-if-error lets the browser HTTP cache serve the stale 50MB as a
+    // backstop for loads the service worker does not intercept (iOS evicts
+    // big Cache API entries, and a SW-served response never reaches the
+    // HTTP cache). The SW itself re-stores responses as immutable (sw.js).
+    'cache-control': 'public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000',
   });
   if (total > 0) headers.set('content-length', String(total));
 

@@ -813,6 +813,65 @@ function bootWasmWorker(parts, kind){
   WASM.worker.postMessage({type:'init', js:parts.js.buffer, wasm:parts.wasm.buffer, net:parts.net.buffer, hashMB:32});
 }
 
+/* ---- IndexedDB net cache (offline layer #2 for the 50MB net) ----
+   After a successful download the net is also mirrored into IndexedDB.
+   On iOS the service worker Cache API can evict a ~50MB entry, but
+   IndexedDB persists, so an offline load can rebuild the engine from it
+   even when the SW cache no longer has it. When the engine is re-compiled
+   bump NET_KEY (stale older blobs are deleted on the next successful
+   download). */
+var NET_KEY='pikafish.nnue-v1';
+function idbOpen(){
+  return new Promise(function(res, rej){
+    if(!('indexedDB' in window)){ rej(new Error('no indexedDB')); return; }
+    var r=indexedDB.open('xq-chess-cache',1);
+    r.onupgradeneeded=function(){ if(!r.result.objectStoreNames.contains('blobs')) r.result.createObjectStore('blobs'); };
+    r.onsuccess=function(){ res(r.result); };
+    r.onerror=function(){ rej(r.error||new Error('indexedDB open')); };
+  });
+}
+function idbGetNet(){
+  return idbOpen().then(function(db){
+    return new Promise(function(res, rej){
+      var rq=db.transaction('blobs','readonly').objectStore('blobs').get(NET_KEY);
+      rq.onsuccess=function(){ res(rq.result||null); };
+      rq.onerror=function(){ rej(rq.error||new Error('indexedDB read')); };
+    });
+  });
+}
+function idbPutNet(u8){
+  return idbOpen().then(function(db){
+    return new Promise(function(res, rej){
+      var tx=db.transaction('blobs','readwrite');
+      var s=tx.objectStore('blobs');
+      var cur=s.openCursor();
+      cur.onsuccess=function(e){ var c=e.target.result; if(c){ if(/^pikafish\.nnue-/.test(c.key) && c.key!==NET_KEY) c.delete(); c.continue(); } };
+      s.put(u8, NET_KEY);
+      tx.oncomplete=function(){ res(true); };
+      tx.onerror=function(){ rej(tx.error||new Error('indexedDB put')); };
+    });
+  });
+}
+function idbToU8(v){
+  if(!v) return Promise.reject(new Error('no net in IndexedDB'));
+  if(v instanceof Uint8Array) return Promise.resolve(v);
+  if(v instanceof ArrayBuffer) return Promise.resolve(new Uint8Array(v));
+  if(typeof Blob!=='undefined' && v instanceof Blob) return v.arrayBuffer().then(function(b){ return new Uint8Array(b); });
+  return Promise.reject(new Error('unrecognized IndexedDB net blob'));
+}
+function idbParts(dir){
+  /* small engine files via the normal fetch chain (the service worker / HTTP
+     cache keeps them), the 50MB net from IndexedDB */
+  return Promise.all([
+    fetch(dir+'engine-wasm.js').then(function(r){ if(!r.ok) throw new Error('engine-wasm.js'); return r.text(); }),
+    fetch(dir+'wasm/pikafish-single.js').then(function(r){ if(!r.ok) throw new Error('module js'); return r.arrayBuffer(); }),
+    fetch(dir+'wasm/pikafish-single.wasm').then(function(r){ if(!r.ok) throw new Error('module wasm'); return r.arrayBuffer(); }),
+    idbGetNet()
+  ]).then(function(p){
+    return idbToU8(p[3]).then(function(net){ return {srcText:p[0], js:new Uint8Array(p[1]), wasm:new Uint8Array(p[2]), net:net}; });
+  });
+}
+
 /* ---- WEB path: fetch the assets (small files, then the 50MB net) ---- */
 function fetchWebAssets(dir){
   return Promise.resolve()
@@ -849,7 +908,13 @@ function fetchWebAssets(dir){
           throw e;
         });
       }
-      return fetchNet(1).then(function(net){ return {srcText:parts[0], js:js, wasm:wasm, net:new Uint8Array(net)}; });
+      return fetchNet(1).then(function(net){
+        var u8=new Uint8Array(net);
+        /* mirror the net into IndexedDB (fire-and-forget) — the offline
+           backup if the service worker cache entry is ever evicted */
+        idbPutNet(u8).catch(function(e){ console.warn('IDB net mirror failed (offline backup unavailable):', e&&e.message||e); });
+        return {srcText:parts[0], js:js, wasm:wasm, net:u8};
+      });
     });
 }
 
@@ -862,8 +927,13 @@ function startWasmLoad(){
 
   var acquire= IS_WEB
     ? fetchWebAssets(dir).catch(function(err){
-        /* web fetch failed (missing file, 50MB pointer, offline…) → embedded */
-        console.warn('WASM web assets failed, falling back to embedded:', err && err.message || err);
+        /* web fetch failed (offline, missing file, 50MB pointer…) → try the
+           IndexedDB net mirror (survives iOS SW-cache eviction) */
+        console.warn('WASM web assets failed, trying IndexedDB net cache:', err && err.message || err);
+        return idbParts(dir);
+      }).catch(function(err){
+        /* no IDB net yet (first offline use) → embedded if it exists */
+        console.warn('WASM web+IDB failed, falling back to embedded:', err && err.message || err);
         return loadEmbedded().then(function(ok){ if(!ok) throw err; return embeddedAssets(); });
       })
     : loadEmbedded().then(function(ok){

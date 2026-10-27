@@ -33,7 +33,7 @@ engine-wasm.js         Pikafish worker 橋
 wasm/pikafish-single.js / .wasm   Emscripten 編譯嘅 Pikafish（~0.6MB）
 wasm/pikafish.nnue     官方 NNUE 網絡（50MB）
 assets-embedded.js     上面四個嘅 base64 合集（~67MB，generated）
-sw.js                  Service Worker（離線 PWA，v6/b9）
+sw.js                  Service Worker（離線 PWA，v7/b10）
 serve.py               本地 LAN server（可選）
 build-wasm.sh          重新編譯 Pikafish → wasm/
 build-assets.py        重新打包 assets-embedded.js
@@ -96,8 +96,27 @@ GitHub Pages 連結照舊運作，兩者內容一致）。
   「未連接互聯網」錯誤。而家 `_headers` 為 shell 檔案（`/`、`sw.js`、
   引擎、icons、manifest）設 `stale-while-revalidate` + `stale-if-error`：
   在線行為唔變（每次重新驗證、更新即時落地），離線時 HTTP cache 會返返
-  上次嗰份；頁面載入後由 service worker（v6）接管其餘全部資源。
-  （`/wasm/pikafish.nnue*` 故意唔加 — function 要 no-store 確保引擎最新）
+  上次嗰份；頁面載入後由 service worker（v7）接管其餘全部資源。
+  （`/wasm/pikafish.nnue*` 故意唔加 — function 自己有 cache policy）
+* **離線第三層（2026-10-27 v7，三重保障）**：iPhone 實測發現 50MB 網絡
+  入唔住 service worker cache（v6 寫 cache 時抹走咗 `Cache-Control`，
+  WebKit 會將無 lifetime 嘅 entry 當 best-effort 很快淘汰）。而家：
+  1. `sw.js`（v7）寫 cache 一律用 `max-age=31536000, immutable`
+    （所有 asset 都係 content-immutable；freshness 靠 cache 名 bump 控制）；
+     大檔下載去重（一次 load 只下載一次 50MB）；Cloudflare 對唔存在嘅
+     路返 200 index.html（例如 `assets-embedded.js`）嘅垃圾 entry 唔會再
+     被 cache / 服務；cache 名 bump 時會先由舊 backup cache 搬大檔（唔使
+     重新下載 50MB），新 cache 完整後先刪除 backup。
+  2. Cloudflare function 改用 `max-age=0, stale-while-revalidate, stale-if-error`
+     （在線每次重新驗證→引擎更新即時落地；離線時 browser HTTP cache 可以
+     返舊 50MB — 專治 SW 唔攞住嗰啲 request）。
+  3. app 下載成功後會 mirror 50MB 網絡入 **IndexedDB**（`index.html` 嘅
+     `idbPutNet`）— iOS 上 IndexedDB 比 SW Cache API 持久得多；離線時 web
+     fetch 失敗會自動改用 IDB 份（`idbParts`）。引擎重新編譯後要 bump
+     `NET_KEY`（`pikafish.nnue-v1` → `v2`…），舊 blob 會自動清走。
+* **iOS 注意**：Safari tab 喺離線狀態開新導航會被 iOS 系統層直接彈
+  「未連接互聯網」（service worker / HTTP cache 都救唔到）— 離線請用
+  **桌面 icon**（standalone 模式）。
 * **重新編譯引擎後**（`./build-wasm.sh`）：除咗照舊做 `build-assets.py`，
   仲要重新拆 parts + 更新份數檔：
   ```sh

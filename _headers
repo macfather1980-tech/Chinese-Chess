@@ -10,13 +10,14 @@
 # Fix: keep online behaviour instant (max-age=0 => revalidate every load,
 # updates land immediately) while allowing the HTTP cache to serve its
 # stale copy when the revalidation fails (offline) — stale-if-error (RFC
-#5861). Once the document loads, the service worker (v6) takes over and
+#5861). Once the document loads, the service worker (v7) takes over and
 # serves everything else from its cache.
 #
-# Deliberately NOT listed: /wasm/pikafish.nnue* (the Cloudflare function
-# returns no-store; the parts must keep instant revalidation so the
-# function always reassembles the freshest engine bytes) — and the 50MB
-# net is cached client-side by the SW, not the HTTP cache.
+# Deliberately NOT listed: /wasm/pikafish.nnue* — the Cloudflare function
+# sets its own policy (v7: max-age=0 + stale-while-revalidate +
+# stale-iferror, so online requests always revalidate but the browser HTTP
+# cache can serve the stale 50MB offline); the .part files keep the default
+# must-revalidate so a new engine deploy reassembles fresh bytes.
 
 /
   Cache-Control: public, max-age=0, stale-while-revalidate=604800, stale-if-error=31536000
