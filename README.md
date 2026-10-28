@@ -151,4 +151,42 @@ GitHub Pages 連結照舊運作，兩者內容一致）。
   ```
   然後 commit + push（记得連 parts 一起 commit）。
 
+## 2026-10-28 v10（`sw.js` b13 + `index.html`）— 在線重開唔再重新下載 50MB
+
+**用戶報告**：iPhone（GitHub Pages 版）用咗一陣之後重新開啟遊戲，有網絡時
+每次都要由 0% 下載返 50MB NNUE 網絡；離線時反而秒開（用 IndexedDB 份）。
+
+**根因**（2026-10-28 實測確認）：
+
+* GitHub Pages 對 `wasm/pikafish.nnue` 只給 `Cache-Control: max-age=600`
+  （10 分鐘；Pages 唔接受 `_headers` 定製）。
+* iOS 會淘汰 service worker Cache Storage 入面嗰個 ~50MB 大 entry
+  （同一個 cache 仲有 67MB embedded 副本，總共 ~120MB，對手機網站好大）。
+* 舊代碼每次在線 load **無條件** fetch 網絡檔：SW cache 有就秒開，
+  被 iOS 淘汰咗就係 50MB 重新下載（0→100% 進度條）；而持久嘅
+  IndexedDB mirror 只喺「fetch 失敗」（離線）先至用到 → 離線快、在線慢。
+
+**修復（三重）**：
+
+1. **頁面 IDB-mirror 優先**（`index.html` `fetchWebAssets`）：fetch 50MB 之前
+   先讀 IndexedDB mirror（首次下載成功後寫入、iOS 上持久）。有 mirror 就
+   直接用（進度顯示「載入本機副本」）— 重開唔再下載。
+   毒 mirror（引擎 `wmain_init` 拒絕）會自動刪除 → 下次重新下載復原。
+2. **SW 唔再自行下載網絡**（`sw.js` v10）：`ensureBig` 對 `pikafish.nnue`
+   只係由 backup cache 搬，唔再 background 下載 — iOS 淘汰後唔會每開一次
+   就 background 食 50MB 流量。
+3. **頁面 push 返去 SW**（`pushNetToSw`）：引擎 boot 驗證成功（ready）後，
+   把嗰份 50MB（mirror 或新下載或 embedded 副本）用 **transferable
+   ArrayBuffer**（零拷貝）post 俾 service worker，SW 存返入 cache —
+   cache 自己修復，零下載。
+
+* **首次使用仍然要一次 50MB 下載**（要網絡）；之後重開（在線/離線）都
+  唔會再下載。引擎重新編譯 → `index.html` 嘅 `NET_KEY` bump
+  （`pikafish.nnue-v1` → `v2`…）→ 新 key 無 mirror → 一次新下載，舊 blob 清走。
+* **WebKit 備忘**：曾試過令 SW 直接讀 IndexedDB mirror，實測 WebKit 嘅 SW
+  `indexedDB.open()`（同一個 DB 有 page 開緊）會永久掛起（無任何事件）— 故
+  用 page-push 設計取代，SW 完全唔讀 IDB。
+* 離線鏈（唔變）：IDB mirror → SW cache（cache-first）→（fresh 機）網絡 →
+  503 → ⚠ JS 備用引擎。
+
 <!-- webhook test 20261027 -->

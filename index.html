@@ -870,17 +870,40 @@ function embeddedAssets(){
 }
 
 /* ---- shared worker boot (both paths) ---- */
+/* Push the verified 50MB net to the service worker's cache as a TRANSFERABLE
+   ArrayBuffer (zero-copy — the page is done with the buffer; the engine
+   worker keeps its own copy). The SW stores it, so its cache self-heals after
+   iOS evicts the big entry; the SW itself never re-downloads the net (sw.js
+   v10). Fired only when the engine booted verified (ready). */
+function pushNetToSw(u8){
+  try{
+    if(!('serviceWorker' in navigator)) return;
+    var c=navigator.serviceWorker.controller;
+    if(c && u8 && u8.byteLength > 1000) c.postMessage({type:'xq-net-mirror', bytes:u8.buffer}, [u8.buffer]);
+  }catch(e){ /* SW is optional; the IndexedDB mirror keeps the offline layer */ }
+}
+
 function bootWasmWorker(parts, kind){
   WASM.srcKind=kind; if(kind==='embed') WASM.usedEmbedded=true;
+  WASM.netFromMirror=!!parts.mirror;   // 50MB came from the IndexedDB mirror
   var b=new Blob([parts.srcText],{type:'text/javascript'});
   WASM.worker=new Worker(URL.createObjectURL(b));
   WASM.worker.onmessage=function(e){
     var d=e.data||{};
     if(d.type==='status'){
       WASM.loadMsg=d.msg||'';
-      if(d.phase==='ready'){ WASM.readyMsg=d.msg||''; WASM.state='ready'; WASM.netPct=100; document.title='中國象棋 · ⚡Pikafish✅'; if(S.mode==='ai') refreshChrome(); }
+      if(d.phase==='ready'){ WASM.readyMsg=d.msg||''; WASM.state='ready'; WASM.netPct=100; document.title='中國象棋 · ⚡Pikafish✅'; pushNetToSw(parts.net); if(S.mode==='ai') refreshChrome(); }
       else if(d.phase==='failed'){
         WASM.failMsg=d.msg||'';
+        /* A poisoned mirror (engine rejected the net) would otherwise be
+           re-used on every launch — delete it so the next launch re-downloads
+           the fresh copy. (The perft self-check makes a false positive here
+           effectively impossible: it only fires on real init failure.) */
+        if(WASM.netFromMirror && /wmain_init/.test(WASM.failMsg)){
+          console.warn('net mirror failed engine init — deleting it');
+          idbDeleteNet().catch(function(e){ console.warn('IDB mirror delete failed:', e&&e.message||e); });
+          WASM.netFromMirror=false;
+        }
         /* Engine init failed (corrupt/partial net on the web path — e.g. a
            Git-LFS pointer file served instead of the binary): try the
            embedded copy once, it was verified when build-assets.py ran. */
@@ -905,6 +928,9 @@ function bootWasmWorker(parts, kind){
    even when the SW cache no longer has it. When the engine is re-compiled
    bump NET_KEY (stale older blobs are deleted on the next successful
    download). */
+/* The engine is re-compiled rarely; when it is, bump this (the page then
+   broadcasts the new key to the service worker, which reads the mirror with
+   it; stale older blobs are deleted on the next successful download). */
 var NET_KEY='pikafish.nnue-v1';
 function idbOpen(){
   return new Promise(function(res, rej){
@@ -934,6 +960,16 @@ function idbPutNet(u8){
       s.put(u8, NET_KEY);
       tx.oncomplete=function(){ res(true); };
       tx.onerror=function(){ rej(tx.error||new Error('indexedDB put')); };
+    });
+  });
+}
+function idbDeleteNet(){
+  return idbOpen().then(function(db){
+    return new Promise(function(res, rej){
+      var tx=db.transaction('blobs','readwrite');
+      tx.objectStore('blobs').delete(NET_KEY);
+      tx.oncomplete=function(){ res(true); };
+      tx.onerror=function(){ rej(tx.error||new Error('indexedDB delete')); };
     });
   });
 }
@@ -993,12 +1029,27 @@ function fetchWebAssets(dir){
           throw e;
         });
       }
-      return fetchNet(1).then(function(net){
-        var u8=new Uint8Array(net);
-        /* mirror the net into IndexedDB (fire-and-forget) — the offline
-           backup if the service worker cache entry is ever evicted */
-        idbPutNet(u8).catch(function(e){ console.warn('IDB net mirror failed (offline backup unavailable):', e&&e.message||e); });
-        return {srcText:parts[0], js:js, wasm:wasm, net:u8};
+      /* 1) Local IndexedDB mirror FIRST. The net is content-immutable per
+         NET_KEY, and the mirror (written after the one verified download)
+         persists on iOS even when the 50MB Cache Storage entry is evicted.
+         Re-using it is what makes an online restart instant — otherwise an
+         evicted SW cache entry forces a full 50MB re-download every launch.
+         2) Only a device with no mirror yet (first use) downloads. */
+      return idbGetNet().then(function(mirror){
+        if(mirror){
+          console.info('Pikafish net from IndexedDB mirror — no download');
+          WASM.netPct=-1; WASM.loadMsg='載入本機副本'; if(S.mode==='ai') refreshChrome();
+          return idbToU8(mirror).then(function(u8){
+            return {srcText:parts[0], js:js, wasm:wasm, net:u8, mirror:true};
+          });
+        }
+        return fetchNet(1).then(function(net){
+          var u8=new Uint8Array(net);
+          /* mirror the net into IndexedDB (fire-and-forget) — the offline
+             backup if the service worker cache entry is ever evicted */
+          idbPutNet(u8).catch(function(e){ console.warn('IDB net mirror failed (offline backup unavailable):', e&&e.message||e); });
+          return {srcText:parts[0], js:js, wasm:wasm, net:u8};
+        });
       });
     });
 }
@@ -1757,7 +1808,7 @@ function boot(){
    Reads the actual Cache Storage + IndexedDB to report whether the 50MB net
    is persisted. This is the source of truth for the menu's "離線快取" line —
    it does NOT rely on a service-worker→page message (which iOS may drop). */
-var SW_CACHE_NAME='xq-chess-v2-2026-10-27-b11';   // must match CACHE in sw.js
+var SW_CACHE_NAME='xq-chess-v2-2026-10-28-b13';   // must match CACHE in sw.js
 function probeOfflineCache(){
   var el=$('mSw'); if(!el) return;
   el.style.color='var(--text-dim)'; el.textContent='離線快取：檢查中…';
@@ -1815,6 +1866,8 @@ if (typeof window !== 'undefined' && window.__XQTEST) {
     count: function(){ var kr=-1,kb=-1,pc=0,b=S.pos.b; for(var s=0;s<90;s++){ if(b[s]===1)kr=s; if(b[s]===-1)kb=s; if(b[s])pc++; } return {kr:kr,kb:kb,pc:pc}; }
   };
 }
+
+
 })();
 </script>
 </body>

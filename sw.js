@@ -2,6 +2,24 @@
    NOTE: registers only over https or localhost (secure context). On a plain
    http LAN URL the game still runs fully; the SW simply won't activate.
 
+   v10 (2026-10-28-b13) — stop the 50MB net re-downloading on every ONLINE
+   restart (seen on iPhones after iOS evicted the big Cache Storage entry):
+   * The PAGE is now IndexedDB-mirror-first: after the one verified download
+     the app reboots the engine from its persistent IndexedDB mirror, so an
+     evicted SW cache entry no longer forces a 50MB re-download next launch.
+   * The SW never downloads the net itself (ensureBig skips it): on iOS an
+     evicted entry would otherwise trigger a 50MB background fetch on every
+     launch. Instead the PAGE pushes the net bytes to the SW
+     ({type:'xq-net-mirror', transferable ArrayBuffer}) once the engine boots
+     verified, and the SW stores them in the cache — the cache self-heals
+     with zero downloads. (The page pushes the EMBEDDED net too when it booted
+     from that — a corrupted cached download gets replaced by the known-good
+     bytes.)
+   * (An earlier revision had the SW read the mirror from IndexedDB directly;
+     on WebKit an indexedDB.open() from a service worker whose database is
+     also open in a page hangs forever with no events — the page-push design
+     replaced it.)
+
    v8 (2026-10-27-b11) — iOS Home Screen app "white chin" fix
    (index.html only, no SW logic changes): WebKit bug 254868 — in
    installed web apps height:100%/svh/dvh/visualViewport all report
@@ -54,7 +72,7 @@
      previous cache that can serve the shell is kept as a BACKUP; the fetch
      fallback chain is CACHE → BACKUPS → (for big) network.
    */
-const CACHE = 'xq-chess-v2-2026-10-27-b11';
+const CACHE = 'xq-chess-v2-2026-10-28-b13';
 const SW_VER = String(CACHE).replace(/^xq-chess-v2-/, '');   // shown in the app menu
 const ASSETS = [
   './',
@@ -77,6 +95,14 @@ const ASSETS = [
 const BIG_ASSETS = [ './wasm/pikafish.nnue', './assets-embedded.js' ];
 
 let BACKUPS = [];   // previous cache names, kept as offline fallback
+
+/* True for the 50MB NNUE net. The SW never DOWNLOADS it on its own (v10):
+   the page's IndexedDB mirror is its offline layer, and the page pushes the
+   bytes back to this cache after the engine boots (xq-net-mirror). */
+function isNet(u) {
+  try { return new URL(u, location.href).pathname.endsWith('wasm/pikafish.nnue'); }
+  catch (e) { return String(u).indexOf('pikafish.nnue') >= 0; }
+}
 
 function isBig(url) {
   let p;
@@ -176,14 +202,18 @@ function backupMatch(u) {
 }
 
 function ensureBig(cache) {
-  // (re)fetch any big asset missing from the current cache — non-fatal.
-  // Adopt from the backup cache first (free), download second. Awaits the
-  // cache put (bigPut) so callers know the entry has really landed.
+  // (re)populate any big asset missing from the current cache — non-fatal.
+  // Adopt from the backup cache first (free). The 67MB embedded backup then
+  // downloads if absent. The 50MB net is deliberately NOT downloaded here
+  // (v10): the page's IndexedDB mirror is its offline layer, and the page
+  // pushes the net to this cache after the engine boots — downloading here
+  // would re-fetch 50MB in the background after every iOS cache eviction.
   return Promise.all(BIG_ASSETS.map((u) =>
     cache.match(u, { ignoreSearch: true }).then((r) => {
       if (r && usable(r, u)) return null;
       return backupMatch(u).then((b) => {
         if (b) return cache.put(u, toCacheable(b.clone()));
+        if (isNet(u)) return null;   // page-push keeps the net warm (v10)
         return downloadBig(u, 2).then((res) =>
           res ? (bigPut[bigKey(u)] || Promise.resolve()) : null);
       });
@@ -193,7 +223,7 @@ function ensureBig(cache) {
 
 self.addEventListener('install', (event) => {
   // Small assets first, then activate ASAP so the new SW serves the app;
-  // big downloads continue in the background (self-heal in activate).
+  // big work continues in the background (self-heal in activate).
   event.waitUntil(
     caches.open(CACHE)
       .then((cache) => Promise.all(ASSETS.map((u) => addRetry(cache, u, 2))))
@@ -201,9 +231,9 @@ self.addEventListener('install', (event) => {
       .then(() => self.clients.claim())
   );
   // Big pre-cache runs in the background on purpose: activation must not
-  // wait on 50MB of downloads, or a slow connection would keep the old SW
-  // (and its possibly-stale cache) in charge. ensureBig() re-runs on every
-  // activate anyway, so nothing is left out in the cold.
+  // wait on downloads, or a slow connection would keep the old SW (and its
+  // possibly-stale cache) in charge. ensureBig() re-runs on every activate
+  // anyway, so nothing is left out in the cold.
   caches.open(CACHE).then((cache) => ensureBig(cache)).catch(() => {});
 });
 
@@ -228,11 +258,13 @@ self.addEventListener('activate', (event) => {
     self.clients.matchAll().forEach((c) => {
       try { c.postMessage({ type: 'xq-sw', ver: SW_VER }); } catch (e) { /* noop */ }
     });
-    // 2) self-heal big assets in the background (adopt-from-backup, else
-    //    download). Deliberately NOT awaited — activation must stay quick.
-    //    Once the new cache is complete, prune the backup (a 50MB entry
-    //    must not live in two caches forever).
-    ensureBig(await caches.open(CACHE)).then(async () => {
+    // 2) self-heal big assets in the background (adopt-from-backup; the net
+    //    is page-push kept warm, see v10). Deliberately NOT awaited —
+    //    activation must stay quick. Once the new cache is complete, prune
+    //    the backup (a 50MB entry must not live in two caches forever).
+    //    The 8s grace lets the page's net push land before the completeness
+    //    check decides the backup's fate.
+    ensureBig(await caches.open(CACHE)).then(() => new Promise((r) => setTimeout(r, 8000))).then(async () => {
       const c = await caches.open(CACHE);
       const complete = (await c.match('./index.html')) && (await c.match('./engine.js'))
         && (await c.match('./wasm/pikafish.nnue', { ignoreSearch: true }));
@@ -246,11 +278,25 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('message', (event) => {
-  // The app pings when its menu opens (in case the activate broadcast was
-  // missed because the page script started later).
   try {
+    // The app pings when its menu opens (in case the activate broadcast was
+    // missed because the page script started later).
     if (event.data && event.data.type === 'xq-ping' && event.source) {
       event.source.postMessage({ type: 'xq-sw', ver: SW_VER });
+    }
+    // The page pushes the 50MB net (its verified bytes: the IndexedDB mirror
+    // or a fresh download, or the embedded copy) as a TRANSFERABLE ArrayBuffer
+    // after the engine boots — the SW stores it so the cache self-heals with
+    // zero downloads (v10). The transfer detaches the page's buffer; the page
+    // is done with it (the engine worker keeps its own copy).
+    if (event.data && event.data.type === 'xq-net-mirror') {
+      const b = event.data.bytes;
+      if (b && b.byteLength > 1000) {
+        const url = new URL('wasm/pikafish.nnue', self.location.href).href;
+        caches.open(CACHE)
+          .then((c) => c.put(url, toCacheable(new Response(b, { headers: { 'content-type': 'application/octet-stream' } }))))
+          .catch((e) => console.warn('[sw] net mirror put failed:', e));
+      }
     }
   } catch (e) { /* noop */ }
 });
