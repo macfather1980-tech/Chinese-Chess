@@ -277,6 +277,26 @@ header.topbar{
   pointer-events:auto; touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
 .bigbtn:active{ transform:translateY(1px); }
 .bigbtn.ghost{ background:var(--panel-2); color:var(--text); border:1px solid #1c130c; }
+/* ---- de-emphasized "advanced" maintenance section ---- */
+.advsec{ margin-top:18px; padding-top:12px; border-top:1px solid #1c130c; text-align:center; }
+.advsec-label{ font-size:.68rem; letter-spacing:.16em; color:var(--text-dim); opacity:.75; margin-bottom:8px; }
+.linkbtn{ background:none; border:0; padding:6px 8px; font-size:.8rem; color:var(--text-dim); opacity:.8;
+  text-decoration:underline dotted; text-underline-offset:3px; cursor:pointer; pointer-events:auto; touch-action:manipulation; }
+.linkbtn:active{ opacity:1; color:var(--text); }
+.advsec-note{ margin-top:8px; font:10px/1.4 system-ui; color:var(--text-dim); opacity:.6; }
+/* ---- reset confirmation dialog (two-step, safe-default) ---- */
+.dc-icon{ font-size:2rem; margin-bottom:6px; }
+.dc-title{ font-size:1.3rem; letter-spacing:.03em; color:var(--gold-2); margin:0 0 10px; }
+.dc-body{ font-size:.95rem; line-height:1.65; color:var(--text); margin:0 0 14px; }
+.dc-body b{ color:var(--gold-2); }
+.dc-check{ display:flex; align-items:center; justify-content:center; gap:9px; margin:0 0 10px;
+  font-size:.98rem; color:var(--text); cursor:pointer; pointer-events:auto; }
+.dc-check input{ width:21px; height:21px; accent-color:var(--check); }
+.dc-net{ margin:0 0 14px; font:11px/1.5 ui-monospace,Menlo,monospace; text-align:center; min-height:15px; }
+.dc-actions{ display:flex; flex-direction:column; gap:10px; }
+.bigbtn.danger{ background:linear-gradient(180deg,#e2694f,var(--bad)); color:#fff; }
+.bigbtn:disabled{ opacity:.5; }
+.bigbtn.danger:disabled{ opacity:.4; filter:saturate(.6); }
 #ovResult{ font-size:1.7rem; margin-bottom:4px; }
 #ovResult.red{ color:var(--ink-red-soft); } #ovResult.black{ color:#efe9db; } #ovResult.draw{ color:var(--gold-2); }
 #ovReason{ color:var(--text-dim); font-size:.95rem; margin-bottom:16px; }
@@ -358,8 +378,27 @@ header.topbar{
     <button class="bigbtn ghost" id="mContinue" hidden>繼續上局</button>
     <div id="mStatus" style="margin-top:12px;font:11px/1.5 ui-monospace,Menlo,monospace;color:var(--text-dim);text-align:center;min-height:14px;"></div>
     <div id="mSw" style="margin-top:2px;font:11px/1.5 ui-monospace,Menlo,monospace;color:var(--text-dim);text-align:center;">離線快取：檢查中…</div>
-    <button class="bigbtn ghost" id="mReset" style="margin-top:10px;">重建離線快取</button>
-    <div style="margin-top:6px;font:10px/1.4 system-ui;color:var(--text-dim);opacity:.7;text-align:center;">清除已存引擎並重新下載（需要網絡）</div>
+    <div class="advsec">
+      <div class="advsec-label">進階選項（一般唔使）</div>
+      <button class="linkbtn" id="mReset">重建離線快取</button>
+      <div class="advsec-note">一般唔需要 · 只有離線層壞咗先要用</div>
+    </div>
+  </div>
+</div>
+
+<!-- reset confirmation (two-step, safe-default) -->
+<div id="resetConfirm" class="overlay" hidden>
+  <div class="dlg">
+    <div class="dc-icon">⚠️</div>
+    <h2 class="dc-title">重建離線快取？</h2>
+    <p class="dc-body">呢步會<b>刪除</b>已下載嘅 AI 引擎（約 50MB），之後<b>要網絡重新下載</b>先返到離線可玩。<br>你已經設定好、正常玩嘅話，<b>通常唔需要做呢步</b>。</p>
+    <label class="dc-check"><input type="checkbox" id="rcAck"> 我明白會刪除引擎</label>
+    <div class="dc-net" id="rcNet"></div>
+    <div class="dc-actions">
+      <button class="bigbtn" id="rcCancel">← 返回（我未需要）</button>
+      <button class="bigbtn danger" id="rcConfirm" disabled>確定要重建</button>
+    </div>
+    <div class="advsec-note" style="margin-top:12px;">萬一離線清咗：連返 Wi-Fi → 重開 app → 等 ⚡ 變綠會自動補返</div>
   </div>
 </div>
 
@@ -1489,22 +1528,42 @@ function initControls(){
   $('btnRestart').onclick=function(){ newGame(S.mode,S.humanColor); };
   $('btnSound').onclick=function(){ S.sound=!S.sound; $('btnSound').textContent=S.sound?'🔊':'🔇'; if(S.sound) audio(); };
   $('btnMenu').onclick=function(){ menuEl.hidden=false; probeOfflineCache(); try{ if(navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({type:'xq-ping'}); }catch(e){} };
-  /* Rebuild the offline cache: clear the (possibly stale/corrupt) service
-     worker + caches + IndexedDB, then reload so the browser installs a clean
-     copy of the current sw.js and re-downloads the engine. */
-  var mReset=$('mReset');
-  if(mReset){
-    mReset.onclick=function(){
-      if(!confirm('重建離線快取？\n\n會清除已下載嘅引擎（約50MB）並重新下載。\n請確保有網絡，然後等 ⚡ Pikafish 變綠。')) return;
-      var steps=[];
-      try{ if('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(function(regs){ regs.forEach(function(r){ r.unregister(); }); }); }catch(e){}
-      try{ if('caches' in window) steps.push(caches.keys().then(function(ks){ return Promise.all(ks.map(function(k){ return caches.delete(k); })); })); }catch(e){}
-      try{ if('indexedDB' in window) steps.push(new Promise(function(res){ var r=indexedDB.deleteDatabase('xq-chess-cache'); r.onsuccess=res; r.onerror=res; r.onblocked=res; })); }catch(e){}
-      mReset.textContent='清除中…（3 秒後重新載入）';
-      var go=function(){ setTimeout(function(){ location.reload(); }, 500); };
-      try{ Promise.all(steps).then(go, go); }catch(e){ go(); }
-    };
+  /* 重建離線快取 — de-emphasized, two-step, network-guarded.
+     Tapping the (dim) advanced link only opens a confirmation panel; nothing
+     is deleted until the user has ticked "我明白" AND is online. Offline the
+     50MB engine would be deleted and unable to re-download, so we refuse. */
+  var mReset=$('mReset'), rcEl=$('resetConfirm'), rcAck=$('rcAck'), rcCancel=$('rcCancel'), rcConfirm=$('rcConfirm'), rcNet=$('rcNet');
+  function netOnline(){ try{ return navigator.onLine !== false; }catch(e){ return true; } }
+  function syncResetGuard(){
+    if(!rcConfirm) return;
+    var on=netOnline(), ok=on && rcAck && rcAck.checked;
+    rcConfirm.disabled = !ok;
+    if(rcNet){
+      if(on){ rcNet.style.color='var(--good)'; rcNet.textContent='📶 網絡：在線'; }
+      else{ rcNet.style.color='var(--bad)'; rcNet.textContent='📵 離線中——先連返網絡，否則清咗會搵唔返'; }
+    }
   }
+  function doReset(){
+    if(!netOnline()){
+      if(rcNet){ rcNet.style.color='var(--bad)'; rcNet.textContent='📵 而家離線，唔可以重建。連返網絡再試。'; }
+      if(rcConfirm) rcConfirm.disabled=true;
+      return;
+    }
+    var steps=[];
+    try{ if('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(function(regs){ regs.forEach(function(r){ r.unregister(); }); }); }catch(e){}
+    try{ if('caches' in window) steps.push(caches.keys().then(function(ks){ return Promise.all(ks.map(function(k){ return caches.delete(k); })); })); }catch(e){}
+    try{ if('indexedDB' in window) steps.push(new Promise(function(res){ var r=indexedDB.deleteDatabase('xq-chess-cache'); r.onsuccess=res; r.onerror=res; r.onblocked=res; })); }catch(e){}
+    if(rcConfirm){ rcConfirm.disabled=true; rcConfirm.textContent='清除中…（重新載入中）'; }
+    if(rcCancel) rcCancel.disabled=true;
+    var go=function(){ setTimeout(function(){ location.reload(); }, 900); };
+    try{ Promise.all(steps).then(go, go); }catch(e){ go(); }
+  }
+  if(mReset){ mReset.onclick=function(){ if(rcAck) rcAck.checked=false; if(rcEl) rcEl.hidden=false; syncResetGuard(); }; }
+  if(rcCancel){ rcCancel.onclick=function(){ if(rcEl) rcEl.hidden=true; }; }
+  if(rcAck){ rcAck.onchange=syncResetGuard; }
+  if(rcConfirm){ rcConfirm.onclick=function(){ if(!rcConfirm.disabled) doReset(); }; }
+  window.addEventListener('online',syncResetGuard);
+  window.addEventListener('offline',syncResetGuard);
   $('ovAgain').onclick=function(){ newGame(S.mode,S.humanColor); };
   $('ovMenu').onclick=function(){ menuEl.hidden=false; };
   // board pointer
@@ -1721,7 +1780,7 @@ function probeOfflineCache(){
   }
   Promise.all([idbHasNet(), swHasNet()]).then(function(r){
     if(r[0]||r[1]){ el.style.color='var(--good)'; el.textContent='離線快取：✓ 就緒（引擎已存，離線可玩）'; }
-    else { el.style.color='var(--bad)'; el.textContent='離線快取：尚未存（下載完會自動存）'; }
+    else { el.style.color='var(--bad)'; el.textContent='離線快取：引擎未下載 · 連返網絡重開會自動補返'; }
   });
 }
 
